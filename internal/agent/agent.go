@@ -149,6 +149,12 @@ func (a *Agent) ApplyConfig(configStr string) error {
 			outFixed := false
 			for _, ob := range outbounds {
 				if outbound, ok := ob.(map[string]interface{}); ok {
+					// 兼容性修复: 移除不支持的 tcp_keep_alive_interval 字段
+					if _, ok := outbound["tcp_keep_alive_interval"]; ok {
+						delete(outbound, "tcp_keep_alive_interval")
+						outFixed = true
+					}
+
 					// 检查是否为指向 127.0.0.1 的 Shadowsocks
 					if srv, ok := outbound["server"].(string); ok && (srv == "127.0.0.1" || srv == "localhost") {
 						if t, ok := outbound["type"].(string); ok && t == "shadowsocks" {
