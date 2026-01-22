@@ -27,7 +27,7 @@ import (
 
 const (
 	// Version 客户端版本号
-	Version = "v3.6.73 (Super LoadBalance Fix)"
+	Version = "v3.6.74 (Provision Field Fix)"
 )
 
 type Config struct {
@@ -237,13 +237,13 @@ func (a *Agent) ApplyConfig(configStr string) error {
 	// 3. 确保内核二进制文件存在，否则自动下载
 	a.EnsureCoreInstalled()
 
-	// 4. 重启 Sing-box 服务
-	return a.RestartSingBox()
+	// 4. 重启 Sing-box 服务 (使用清洗过的 finalConfigStr)
+	return a.RestartSingBox(finalConfigStr)
 }
 
-func (a *Agent) RestartSingBox() error {
+func (a *Agent) RestartSingBox(configStr string) error {
 	if a.cfg.UseInternal {
-		return a.UpdateInternalCore(a.lastConfig)
+		return a.UpdateInternalCore(configStr)
 	}
 
 	if runtime.GOOS == "windows" {
