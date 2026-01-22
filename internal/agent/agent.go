@@ -27,7 +27,7 @@ import (
 
 const (
 	// Version 客户端版本号
-	Version = "v3.6.60 (Local Direct Hotfix)"
+	Version = "v3.6.73 (Super LoadBalance Fix)"
 )
 
 type Config struct {
@@ -126,17 +126,22 @@ func (a *Agent) ApplyConfig(configStr string) error {
 						}
 					}
 
-					// 2. 强制为 AnyTLS 注入 ALPN 并关闭 Sniff 以提升稳定性
-					if t, ok := inbound["type"].(string); ok && t == "anytls" {
-						// 关闭 Sniffing
-						inbound["sniff"] = false
-						delete(inbound, "sniff_timeout") // 彻底移除字段，避免 "invalid duration" 错误
-
-						if tlsVal, ok := inbound["tls"]; ok {
-							if tls, ok := tlsVal.(map[string]interface{}); ok {
+					// 2. 强制注入 ALPN 并根据协议优化 Sniff
+					if tlsVal, ok := inbound["tls"]; ok {
+						if tls, ok := tlsVal.(map[string]interface{}); ok {
+							if tls["alpn"] == nil {
 								tls["alpn"] = []string{"h2", "http/1.1"}
 								fixed = true
 							}
+						}
+					}
+
+					if t, ok := inbound["type"].(string); ok && (t == "anytls" || t == "vless") {
+						// 对于特定流控协议，放宽或关闭嗅探以提升握手稳定性
+						if t == "anytls" {
+							inbound["sniff"] = false
+							delete(inbound, "sniff_timeout")
+							fixed = true
 						}
 					}
 				}

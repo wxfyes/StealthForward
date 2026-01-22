@@ -14,11 +14,12 @@ import (
 
 // SingBoxConfig 绝不包含任何会让魔改内核崩溃的 experimental 或 hosts 字段
 type SingBoxConfig struct {
-	Log       interface{}   `json:"log"`
-	DNS       interface{}   `json:"dns,omitempty"`
-	Route     interface{}   `json:"route"`
-	Outbounds []interface{} `json:"outbounds"`
-	Inbounds  []interface{} `json:"inbounds"`
+	Log       interface{}       `json:"log"`
+	DNS       interface{}       `json:"dns,omitempty"`
+	Route     interface{}       `json:"route"`
+	Outbounds []interface{}     `json:"outbounds"`
+	Inbounds  []interface{}     `json:"inbounds"`
+	Provision map[string]string `json:"provision,omitempty"`
 }
 
 func GenerateEntryConfig(entry *models.EntryNode, rules []models.ForwardingRule, exits []models.ExitNode) (string, error) {
@@ -46,6 +47,14 @@ func GenerateEntryConfig(entry *models.EntryNode, rules []models.ForwardingRule,
 	keyPath := entry.Key
 	if keyPath == "" {
 		keyPath = "/etc/stealthforward/certs/" + entry.Domain + "/cert.key"
+	}
+
+	// 自动下发证书内容给 Agent (为了支持多负载机同步)
+	if entry.CertBody != "" && entry.KeyBody != "" {
+		config.Provision = map[string]string{
+			certPath: entry.CertBody,
+			keyPath:  entry.KeyBody,
+		}
 	}
 
 	// 回落配置
@@ -206,6 +215,7 @@ func GenerateEntryConfig(entry *models.EntryNode, rules []models.ForwardingRule,
 	tlsConfig := map[string]interface{}{
 		"enabled":     true,
 		"min_version": "1.2",
+		"alpn":        []string{"h2", "http/1.1"},
 	}
 
 	if entry.RealityEnabled {
