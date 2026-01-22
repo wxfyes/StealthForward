@@ -111,6 +111,16 @@ func GenerateEntryConfig(entry *models.EntryNode, rules []models.ForwardingRule,
 		}
 	}
 
+	// === 核心修复：强制开启所有 Mapping 定义的端口 ===
+	// 即使该端口暂时没有分配用户，也要开启监听，否则端口检测工具会报失败
+	for _, m := range mappings {
+		if m.Port > 0 {
+			if _, exists := portToUsers[m.Port]; !exists {
+				portToUsers[m.Port] = []models.ForwardingRule{}
+			}
+		}
+	}
+
 	// 辅助函数：根据协议生成 User 配置
 	generateUsers := func(protocol string, ruleList []models.ForwardingRule) []map[string]interface{} {
 		var users []map[string]interface{}

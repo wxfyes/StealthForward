@@ -27,7 +27,7 @@ import (
 
 const (
 	// Version 客户端版本号
-	Version = "v3.6.74 (Provision Field Fix)"
+	Version = "v3.6.75 (Forced MultiPort Listen)"
 )
 
 type Config struct {
