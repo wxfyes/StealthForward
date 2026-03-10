@@ -86,7 +86,7 @@ function install_ss() {
     else
         echo -e "${BLUE}未检测到兼容核心，正在为您安装隔离版内核...${PLAIN}"
         bash <(curl -fsSL https://sing-box.app/install.sh)
-        SB_BIN="/usr/local/bin/sing-box"
+        SB_BIN=$(command -v sing-box || echo "/usr/bin/sing-box")
         SB_TYPE="native"
     fi
 
