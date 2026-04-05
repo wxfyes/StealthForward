@@ -28,6 +28,8 @@ const form = ref({
   grpc_service: '',   // gRPC service name
   certificate: '',
   key: '',
+  cert_body: '',
+  key_body: '',
   fallback: '127.0.0.1:80',
   target_exit_id: 0,
   v2board_url: '',
@@ -277,6 +279,16 @@ async function handleSubmit() {
             <input v-model="form.key" placeholder="/etc/stealthforward/certs/cert.key" />
           </label>
           
+          <label class="md:col-span-2 flex flex-col gap-1.5 text-[var(--text-muted)]">
+            证书内容 (PEM) - 填入内容可同步至所有负载机
+            <textarea v-model="form.cert_body" rows="4" class="font-mono text-[10px] bg-black/20" placeholder="-----BEGIN CERTIFICATE-----"></textarea>
+          </label>
+          
+          <label class="md:col-span-2 flex flex-col gap-1.5 text-[var(--text-muted)]">
+            私钥内容 (KEY)
+            <textarea v-model="form.key_body" rows="4" class="font-mono text-[10px] bg-black/20" placeholder="-----BEGIN PRIVATE KEY-----"></textarea>
+          </label>
+
           <label class="md:col-span-2 flex flex-col gap-1.5 text-[var(--text-muted)]">
             回落托管 (HTTP)
             <input v-model="form.fallback" placeholder="127.0.0.1:80" />

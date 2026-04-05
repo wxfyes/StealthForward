@@ -3,6 +3,8 @@ package agent
 import (
 	"bytes"
 	"context"
+	"crypto/pem"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -27,7 +30,7 @@ import (
 
 const (
 	// Version 客户端版本号
-	Version = "v3.6.75 (Forced MultiPort Listen)"
+	Version = "v3.6.76 (Cert Renewal & Manual Sync)"
 )
 
 type Config struct {
@@ -411,9 +414,18 @@ func (a *Agent) RunOnce() {
 		return
 	}
 
-	// 2. 检查是否有证书申请任务
-	if result.CertTask {
-		log.Printf("Received certificate issuance task for domain: %s", result.Domain)
+	// 2. 检查是否有证书申请任务，或者本地证书已失效 (主动防御)
+	shouldIssue := result.CertTask
+	if !shouldIssue && result.Domain != "" {
+		certPath := "/etc/stealthforward/certs/" + result.Domain + "/cert.crt"
+		if a.isCertExpiredSoon(certPath, 7) {
+			log.Printf("[Auto-Check] Certificate for %s missing or expiring soon, triggering auto-renewal.", result.Domain)
+			shouldIssue = true
+		}
+	}
+
+	if shouldIssue && result.Domain != "" {
+		log.Printf("Starting certificate issuance for domain: %s (Task: %v)", result.Domain, result.CertTask)
 		go a.IssueCertLocally(result.Domain)
 	}
 
@@ -434,8 +446,12 @@ func (a *Agent) IssueCertLocally(domain string) {
 
 	if _, err := os.Stat(certFile); err == nil {
 		if _, err := os.Stat(keyFile); err == nil {
-			log.Printf("Certificate for %s already exists at %s, skipping issuance.", domain, certDir)
-			return
+			// 增加检查：如果证书存在，判断是否快过期了 (小于 7 天则重新申请)
+			if !a.isCertExpiredSoon(certFile, 7) {
+				log.Printf("Certificate for %s already exists and is valid, skipping issuance.", domain)
+				return
+			}
+			log.Printf("Certificate for %s is expired or about to expire, re-issuing...", domain)
 		}
 	}
 
@@ -498,34 +514,33 @@ func (a *Agent) IssueCertLocally(domain string) {
 		webroot = btPath
 	}
 
-	// 使用 Let's Encrypt 作为默认 CA
+	// 默认使用 letsencrypt，如果受限可以考虑 zerossl
 	caServer := "letsencrypt"
 	email := "admin@" + domain
 
-	// 不管是否已注册，再次注册一般不会报错，或者会返回已注册
+	// 1. 尝试注册账号
+	log.Printf("Registering ACME account for %s...", email)
 	exec.Command(acmePath, "--register-account", "-m", email, "--server", caServer).Run()
 
-	// 1. 尝试第一种方式：Webroot 模式 (配合 Nginx/Apache)
+	// 2. 尝试第一种方式：Webroot 模式 (配合 Nginx/Apache)
 	log.Printf("Trying ACME issuance via Webroot (%s) using CA: %s...", webroot, caServer)
 	cmd := exec.Command(acmePath, "--issue", "--server", caServer, "-d", domain, "-w", webroot, "--force")
 	output, err := cmd.CombinedOutput()
 
 	if err != nil {
-		log.Printf("Webroot mode failed: %v. Output snippet: %s", err, string(output))
-		log.Printf("Trying Standalone mode (temporarily stopping Nginx)...")
+		outputStr := string(output)
+		if strings.Contains(outputStr, "rateLimited") {
+			log.Printf("!!! Let's Encrypt Rate Limit Hit !!! Switching to peak mode or waiting is required.")
+		}
+		
+		log.Printf("Webroot mode failed, trying Standalone mode (temporarily stopping Nginx)...")
 
-		// 2. 尝试第二种方式：Standalone 模式 (最稳，模仿用户脚本逻辑)
-		// 暂时停止 Nginx 以释放 80 端口
+		// 3. 尝试第二种方式：Standalone 模式
 		exec.Command("systemctl", "stop", "nginx").Run()
-
-		// 补齐 socat 依赖 (Standalone 必齐)
 		exec.Command("sh", "-c", "apt-get install -y socat || yum install -y socat").Run()
 
-		// Standalone 模式申请
 		standaloneCmd := exec.Command(acmePath, "--issue", "--server", caServer, "-d", domain, "--standalone", "--force")
 		output, err = standaloneCmd.CombinedOutput()
-
-		// 无论成功与否，恢复 Nginx (如果之前是开着的)
 		exec.Command("systemctl", "start", "nginx").Run()
 
 		if err != nil {
@@ -624,4 +639,26 @@ func (a *Agent) EnsureCoreInstalled() {
 		return
 	}
 	log.Printf("Core binary installed successfully to %s", path)
+}
+
+// isCertExpiredSoon 检查证书是否在指定天数内过期
+func (a *Agent) isCertExpiredSoon(certPath string, days int) bool {
+	certBytes, err := os.ReadFile(certPath)
+	if err != nil {
+		return true
+	}
+
+	block, _ := pem.Decode(certBytes)
+	if block == nil {
+		return true
+	}
+
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return true
+	}
+
+	// 剩余时间小于指定天数，或者已经过期
+	threshold := time.Duration(days) * 24 * time.Hour
+	return time.Until(cert.NotAfter) < threshold
 }
