@@ -408,6 +408,7 @@ func (a *Agent) RunOnce() {
 		Config   string `json:"config"`
 		CertTask bool   `json:"cert_task"`
 		Domain   string `json:"domain"`
+		CfToken  string `json:"cf_token"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		log.Printf("Failed to decode sync response: %v", err)
@@ -425,8 +426,8 @@ func (a *Agent) RunOnce() {
 	}
 
 	if shouldIssue && result.Domain != "" {
-		log.Printf("Starting certificate issuance for domain: %s (Task: %v)", result.Domain, result.CertTask)
-		go a.IssueCertLocally(result.Domain)
+		log.Printf("Starting certificate issuance for domain: %s (Task: %v, CF_DNS: %v)", result.Domain, result.CertTask, result.CfToken != "")
+		go a.IssueCertLocally(result.Domain, result.CfToken)
 	}
 
 	// 3. 应用配置
@@ -437,8 +438,8 @@ func (a *Agent) RunOnce() {
 	}
 }
 
-// IssueCertLocally 为域名申请 ACME 证书（不支持 IP 地址，需手动配置）
-func (a *Agent) IssueCertLocally(domain string) {
+// IssueCertLocally 为域名申请 ACME 证书（优先 DNS-01，后退 Webroot/Standalone）
+func (a *Agent) IssueCertLocally(domain string, cfToken string) {
 	// 首先检查证书是否已经存在
 	certDir := "/etc/stealthforward/certs/" + domain
 	certFile := certDir + "/cert.crt"
@@ -522,10 +523,43 @@ func (a *Agent) IssueCertLocally(domain string) {
 	log.Printf("Registering ACME account for %s...", email)
 	exec.Command(acmePath, "--register-account", "-m", email, "--server", caServer).Run()
 
+	var output []byte
+	var err error
+	var cmd *exec.Cmd
+
+	// === 终极稳定方案：DNS-01 挑战 (如果有 CF_Token) ===
+	if cfToken != "" {
+		log.Printf("!!! CF_Token detected, using DNS-01 challenge for ultimate stability on multi-IP architectures !!!")
+		os.Setenv("CF_Token", cfToken)
+		
+		dnsCmd := exec.Command(acmePath, "--issue", "--server", caServer, "--dns", "dns_cf", "-d", domain, "--force")
+		output, err = dnsCmd.CombinedOutput()
+		
+		if err == nil {
+			log.Printf("DNS-01 challenge succeeded for %s via Cloudflare!", domain)
+			goto InstallCert // 直接跳转到安装和上传步骤
+		} else {
+			outputStr := string(output)
+			log.Printf("DNS-01 challenge failed: %s. Retrying with ZeroSSL...", outputStr)
+			if strings.Contains(outputStr, "rateLimited") {
+				caServer = "zerossl"
+				exec.Command(acmePath, "--register-account", "-m", email, "--server", caServer).Run()
+				dnsCmd = exec.Command(acmePath, "--issue", "--server", caServer, "--dns", "dns_cf", "-d", domain, "--force")
+				output, err = dnsCmd.CombinedOutput()
+			}
+			
+			if err == nil {
+				log.Printf("DNS-01 challenge succeeded for %s with ZeroSSL via Cloudflare!", domain)
+				goto InstallCert
+			}
+			log.Printf("DNS-01 mode completely failed. Falling back to HTTP-01 modes...")
+		}
+	}
+
 	// 2. 尝试第一种方式：Webroot 模式 (配合 Nginx/Apache)
 	log.Printf("Trying ACME issuance via Webroot (%s) using CA: %s...", webroot, caServer)
-	cmd := exec.Command(acmePath, "--issue", "--server", caServer, "-d", domain, "-w", webroot, "--force")
-	output, err := cmd.CombinedOutput()
+	cmd = exec.Command(acmePath, "--issue", "--server", caServer, "-d", domain, "-w", webroot, "--force")
+	output, err = cmd.CombinedOutput()
 
 	if err != nil {
 		outputStr := string(output)
@@ -543,7 +577,8 @@ func (a *Agent) IssueCertLocally(domain string) {
 		exec.Command("systemctl", "stop", "nginx").Run()
 		exec.Command("sh", "-c", "apt-get install -y socat || yum install -y socat").Run()
 
-		standaloneCmd := exec.Command(acmePath, "--issue", "--server", caServer, "-d", domain, "--standalone", "--force")
+		var standaloneCmd *exec.Cmd
+		standaloneCmd = exec.Command(acmePath, "--issue", "--server", caServer, "-d", domain, "--standalone", "--force")
 		output, err = standaloneCmd.CombinedOutput()
 		
 		// 如果 Standalone 也因为 Let's encrypt 限流失败 (可能是刚才没切换)
@@ -558,10 +593,12 @@ func (a *Agent) IssueCertLocally(domain string) {
 		exec.Command("systemctl", "start", "nginx").Run()
 
 		if err != nil {
-			log.Printf("Critical: Both Webroot and Standalone ACME issuance failed for %s. Output: %s", domain, string(output))
+			log.Printf("Critical: ACME issuance completely failed for %s. Output: %s", domain, string(output))
 			return
 		}
 	}
+
+InstallCert:
 	log.Printf("Successfully issued certificate for %s", domain)
 
 	// 安装证书到本地指定目录

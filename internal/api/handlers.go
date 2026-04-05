@@ -44,11 +44,19 @@ func GetConfigHandler(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate config"})
 		return
 	}
-	// 4. 返回 JSON 响应，包含配置和可能的任务
+	// 4. 获取 CF_API_TOKEN (用于下发给 Agent 实现最稳定的 DNS-01 验证)
+	var cfToken string
+	var setting models.SystemSetting
+	if err := database.DB.Where("key = ?", "cloudflare.api_token").First(&setting).Error; err == nil {
+		cfToken = setting.Value
+	}
+
+	// 5. 返回 JSON 响应，包含配置和可能的任务
 	c.JSON(http.StatusOK, gin.H{
 		"config":    config,
 		"cert_task": entry.CertTask,
 		"domain":    entry.Domain,
+		"cf_token":  cfToken,
 	})
 }
 
