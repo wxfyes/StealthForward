@@ -132,10 +132,9 @@ func (a *Agent) ApplyConfig(configStr string) error {
 					// 2. 强制注入 ALPN 并根据协议优化 Sniff
 					if tlsVal, ok := inbound["tls"]; ok {
 						if tls, ok := tlsVal.(map[string]interface{}); ok {
-							if tls["alpn"] == nil {
-								tls["alpn"] = []string{"h2", "http/1.1"}
-								fixed = true
-							}
+							// 强制覆盖 ALPN 为 http/1.1，避免单机 fallback 时的 H2 协议降级断联错误
+							tls["alpn"] = []string{"http/1.1"}
+							fixed = true
 						}
 					}
 

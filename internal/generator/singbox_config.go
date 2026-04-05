@@ -225,7 +225,7 @@ func GenerateEntryConfig(entry *models.EntryNode, rules []models.ForwardingRule,
 	tlsConfig := map[string]interface{}{
 		"enabled":     true,
 		"min_version": "1.2",
-		"alpn":        []string{"h2", "http/1.1"},
+		"alpn":        []string{"http/1.1"},
 	}
 
 	if entry.RealityEnabled {
