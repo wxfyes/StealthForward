@@ -3,9 +3,9 @@ package agent
 import (
 	"bytes"
 	"context"
-	"crypto/pem"
 	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"log"
