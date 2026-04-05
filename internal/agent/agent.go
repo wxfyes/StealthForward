@@ -529,11 +529,15 @@ func (a *Agent) IssueCertLocally(domain string) {
 
 	if err != nil {
 		outputStr := string(output)
-		if strings.Contains(outputStr, "rateLimited") {
-			log.Printf("!!! Let's Encrypt Rate Limit Hit !!! Switching to peak mode or waiting is required.")
+		
+		// 智能感知：如果是负载均衡分流导致的验证失败，或者遭遇限流，自动切换到 ZeroSSL
+		if strings.Contains(outputStr, "rateLimited") || strings.Contains(outputStr, "Invalid response") {
+			log.Printf("!!! ACME Challenge failed (Rate Limit or Multi-IP routing off) !!! Switching to ZeroSSL...")
+			caServer = "zerossl"
+			exec.Command(acmePath, "--register-account", "-m", email, "--server", caServer).Run()
 		}
 		
-		log.Printf("Webroot mode failed, trying Standalone mode (temporarily stopping Nginx)...")
+		log.Printf("Webroot mode failed, trying Standalone mode with %s (temporarily stopping Nginx)...", caServer)
 
 		// 3. 尝试第二种方式：Standalone 模式
 		exec.Command("systemctl", "stop", "nginx").Run()
@@ -541,6 +545,16 @@ func (a *Agent) IssueCertLocally(domain string) {
 
 		standaloneCmd := exec.Command(acmePath, "--issue", "--server", caServer, "-d", domain, "--standalone", "--force")
 		output, err = standaloneCmd.CombinedOutput()
+		
+		// 如果 Standalone 也因为 Let's encrypt 限流失败 (可能是刚才没切换)
+		if err != nil && caServer != "zerossl" && strings.Contains(string(output), "rateLimited") {
+			log.Printf("!!! Let's Encrypt Rate Limit Hit on Standalone !!! Switching to ZeroSSL and retrying...")
+			caServer = "zerossl"
+			exec.Command(acmePath, "--register-account", "-m", email, "--server", caServer).Run()
+			standaloneCmd = exec.Command(acmePath, "--issue", "--server", caServer, "-d", domain, "--standalone", "--force")
+			output, err = standaloneCmd.CombinedOutput()
+		}
+
 		exec.Command("systemctl", "start", "nginx").Run()
 
 		if err != nil {
