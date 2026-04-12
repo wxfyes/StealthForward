@@ -30,7 +30,7 @@ import (
 
 const (
 	// Version 客户端版本号
-	Version = "v3.6.78 (Security UI & Auth Separation)"
+	Version = "v3.6.80 (Fix Login Kickout Bug)"
 )
 
 type Config struct {
