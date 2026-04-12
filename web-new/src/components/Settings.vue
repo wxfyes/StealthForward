@@ -10,6 +10,8 @@ const loaded = ref(false)
 const cloudAccounts = ref([])
 const sshKeys = ref([])
 const files = ref([]) // 对应之前的 keys 变量 (实体文件)
+const showPass = ref(false)
+const confirmPass = ref('')
 
 // 综合检查配置是否已经填充
 function checkLoaded() {
@@ -86,12 +88,32 @@ async function saveSSHKey(sk) {
 }
 
 async function saveSettings() {
+  if (settings.value['system.admin_password'] && settings.value['system.admin_password'] !== confirmPass.value) {
+    alert('两次输入的密码不一致，请检查！')
+    return
+  }
+
+  const isChangingPass = !!settings.value['system.admin_password']
+  if (isChangingPass) {
+    if (!confirm('你正在修改管理员密码。修改成功后，当前的登录会话将失效，你需要使用新密码重新登录。是否继续？')) {
+      return
+    }
+  }
+
   saving.value = true
   try {
     await apiPost('/api/v1/system/config', settings.value)
-    alert('配置已保存')
+    alert('配置已完成保存！' + (isChangingPass ? ' 密码已更改，请重新登录。' : ''))
+    if (isChangingPass) {
+      localStorage.removeItem('token')
+      window.location.reload()
+    }
   } catch (e) {
-    alert('保存失败: ' + e.message)
+    if (e.message.includes('401')) {
+      alert('保存失败：身份验证过期 (401)。这通常是因为你刚才修改了密码或主控已更新鉴权逻辑。请退出并重新登录后再试。')
+    } else {
+      alert('保存失败: ' + e.message)
+    }
   } finally {
     saving.value = false
   }
@@ -197,10 +219,24 @@ function formatSize(bytes) {
 
         <div class="space-y-4">
           <h3 class="text-sm font-bold text-rose-500 uppercase tracking-widest">Security</h3>
-          <label class="block text-sm text-[var(--text-muted)]">
-            Admin Password (面板登录密码)
-            <input v-model="settings['system.admin_password']" type="password" class="w-full mt-1" placeholder="留空则沿用环境变量或默认密码" />
-          </label>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <label class="block text-sm text-[var(--text-muted)]">
+              Admin Password (面板登录密码)
+              <div class="relative">
+                <input v-model="settings['system.admin_password']" :type="showPass ? 'text' : 'password'" class="w-full mt-1 pr-10" placeholder="留空则沿用环境变量" />
+                <button @click="showPass = !showPass" class="absolute right-2 top-1.5 text-gray-400">
+                  <svg v-if="showPass" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                  <svg v-else class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.542-7 1.274-4.057-5.064-7-9.542-7 1.274-4.057-5.064-7-9.542-7 .308-.027.616-.05.927-.067M10.125 5.175A8.945 8.945 0 0112 5c4.478 0 8.268 2.943 9.542 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21m-4.225-4.225L3 3" /></svg>
+                </button>
+              </div>
+            </label>
+            <label class="block text-sm text-[var(--text-muted)]">
+              Confirm Password (确认密码)
+              <input v-model="confirmPass" :type="showPass ? 'text' : 'password'" class="w-full mt-1" :class="{'border-rose-500': confirmPass && settings['system.admin_password'] !== confirmPass}" />
+            </label>
+          </div>
+          <p v-if="confirmPass && settings['system.admin_password'] !== confirmPass" class="text-[10px] text-rose-500">- 两次输入的密码不一致！</p>
+          
           <label class="block text-sm text-[var(--text-muted)] mt-4">
             Communication Token (Agent 通信密钥)
             <div class="flex gap-2">
@@ -213,7 +249,7 @@ function formatSize(bytes) {
       </div>
       
       <div class="mt-8 flex justify-end gap-3">
-         <button @click="saveSettings" :disabled="saving" class="bg-primary-600 hover:bg-primary-500 disabled:opacity-50 text-white px-8 py-3 rounded-xl font-bold transition shadow-lg shadow-primary-500/20 active:scale-95">
+         <button @click="saveSettings" :disabled="saving || (confirmPass && settings['system.admin_password'] !== confirmPass)" class="bg-primary-600 hover:bg-primary-500 disabled:opacity-50 text-white px-8 py-3 rounded-xl font-bold transition shadow-lg shadow-primary-500/20 active:scale-95">
           {{ saving ? '保存中...' : '保存系统配置' }}
         </button>
       </div>
