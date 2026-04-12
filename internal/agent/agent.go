@@ -30,7 +30,7 @@ import (
 
 const (
 	// Version 客户端版本号
-	Version = "v3.6.76 (Cert Renewal & Manual Sync)"
+	Version = "v3.6.77 (Auth Separation & Better Logging)"
 )
 
 type Config struct {
@@ -97,6 +97,9 @@ func (a *Agent) FetchConfig() (string, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode == http.StatusUnauthorized {
+			return "", fmt.Errorf("controller returned 401 Unauthorized: please check your -token parameter")
+		}
 		return "", fmt.Errorf("controller returned status: %d", resp.StatusCode)
 	}
 
@@ -380,8 +383,14 @@ func (a *Agent) reportTrafficLoop() {
 		if err == nil {
 			if resp.StatusCode == http.StatusOK {
 				pendingUserStats = make(map[string][2]int64) // 只有成功才清空
+			} else if resp.StatusCode == http.StatusUnauthorized {
+				log.Printf("[Traffic] Report failed: 401 Unauthorized. Please check your -token parameter.")
+			} else {
+				log.Printf("[Traffic] Report failed with status: %d", resp.StatusCode)
 			}
 			resp.Body.Close()
+		} else {
+			log.Printf("[Traffic] Network error during reporting: %v", err)
 		}
 	}
 }
@@ -402,6 +411,15 @@ func (a *Agent) RunOnce() {
 		return
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode == http.StatusUnauthorized {
+			log.Printf("Fetch failed: 401 Unauthorized. Token mismatch between Agent and Controller!")
+		} else {
+			log.Printf("Fetch failed with status: %d", resp.StatusCode)
+		}
+		return
+	}
 
 	var result struct {
 		Config   string `json:"config"`

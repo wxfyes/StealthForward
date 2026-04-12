@@ -40,4 +40,6 @@ const (
 	ConfigKeyAwsDefaultRegion   = "aws.default_region" // 默认区域
 	ConfigKeyCfApiToken         = "cloudflare.api_token"
 	ConfigKeyCfDefaultZone      = "cloudflare.default_zone" // 默认域名 (2233006.xyz)
+	ConfigKeyAdminPassword     = "system.admin_password"   // 管理员登录密码
+	ConfigKeyCommunicationToken = "system.communication_token" // Agent/API 通信密钥
 )

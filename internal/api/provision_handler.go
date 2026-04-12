@@ -33,7 +33,6 @@ func ReprovisionNodeHandler(c *gin.Context) {
 	}
 
 	// 2. 构造对接指令 (由主控地址和 Token 组成)
-	// 支持 Nginx 反向代理：优先读取 X-Forwarded-Proto 头
 	host := c.Request.Host
 	protocol := "http"
 	if forwardedProto := c.GetHeader("X-Forwarded-Proto"); forwardedProto != "" {
@@ -43,16 +42,17 @@ func ReprovisionNodeHandler(c *gin.Context) {
 	}
 	controllerURL := fmt.Sprintf("%s://%s", protocol, host)
 
-	// 鉴权 Token
-	adminToken := os.Getenv("STEALTH_ADMIN_TOKEN")
-
-	agentVersion := "v3.5.6"
-	_ = agentVersion
+	// 鉴权 Token (优先使用通信密钥)
+	validToken := os.Getenv("STEALTH_ADMIN_TOKEN")
+	var commSetting models.SystemSetting
+	if err := database.DB.Where("key = ?", models.ConfigKeyCommunicationToken).First(&commSetting).Error; err == nil && commSetting.Value != "" {
+		validToken = commSetting.Value
+	}
 
 	installCmd := fmt.Sprintf(
 		"export CTRL_ADDR='%s' && export NODE_ID='%d' && export CTRL_TOKEN='%s' && export CTRL_DOMAIN='%s' && "+
 			"curl -fsSL https://raw.githubusercontent.com/wangn9900/StealthForward/main/scripts/install.sh | bash -s -- 2 >> /var/log/stealth-init.log 2>&1",
-		controllerURL, entry.ID, adminToken, entry.Domain,
+		controllerURL, entry.ID, validToken, entry.Domain,
 	)
 
 	// 如果用户有特殊的 install.sh 逻辑，也可以考虑用它

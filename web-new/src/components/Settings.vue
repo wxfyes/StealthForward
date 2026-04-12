@@ -194,6 +194,22 @@ function formatSize(bytes) {
             <input v-model="settings['cloudflare.default_zone']" class="w-full mt-1" />
           </label>
         </div>
+
+        <div class="space-y-4">
+          <h3 class="text-sm font-bold text-rose-500 uppercase tracking-widest">Security</h3>
+          <label class="block text-sm text-[var(--text-muted)]">
+            Admin Password (面板登录密码)
+            <input v-model="settings['system.admin_password']" type="password" class="w-full mt-1" placeholder="留空则沿用环境变量或默认密码" />
+          </label>
+          <label class="block text-sm text-[var(--text-muted)] mt-4">
+            Communication Token (Agent 通信密钥)
+            <div class="flex gap-2">
+              <input v-model="settings['system.communication_token']" class="w-full font-mono text-indigo-500" readonly />
+              <button @click="() => { settings['system.communication_token'] = Math.random().toString(36).substring(2,10) + Math.random().toString(36).substring(2,10) }" class="text-[10px] bg-rose-500/10 text-rose-500 px-2 rounded-lg">重置</button>
+            </div>
+            <p class="text-[10px] text-rose-400 mt-1 italic">提示：给 Agent 使用这个密钥。修改上面的登录密码不会导致 Agent 断联。</p>
+          </label>
+        </div>
       </div>
       
       <div class="mt-8 flex justify-end gap-3">

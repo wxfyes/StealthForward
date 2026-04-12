@@ -34,11 +34,19 @@ func LoginHandler(c *gin.Context) {
 		return
 	}
 
-	// 默认使用 admin / admin (如果没有配置环境变量)
+	// 鉴权优先级：数据库设置 > 环境变量 > 硬编码默认
 	defaultPassword := "admin"
-	envToken := os.Getenv("STEALTH_ADMIN_TOKEN")
-	if envToken != "" {
-		defaultPassword = envToken
+	
+	// 1. 尝试从数据库获取
+	var dbSetting models.SystemSetting
+	if err := database.DB.Where("key = ?", models.ConfigKeyAdminPassword).First(&dbSetting).Error; err == nil && dbSetting.Value != "" {
+		defaultPassword = dbSetting.Value
+	} else {
+		// 2. 尝试从环境变量获取
+		envToken := os.Getenv("STEALTH_ADMIN_TOKEN")
+		if envToken != "" {
+			defaultPassword = envToken
+		}
 	}
 
 	if req.Username == "admin" && req.Password == defaultPassword {
@@ -109,7 +117,17 @@ func GetSystemConfigHandler(c *gin.Context) {
 			configMap[models.ConfigKeyAwsDefaultRegion] = "ap-northeast-1"
 		}
 	}
-	// SecretKey 如果是从环境变量拿的，要不要脱敏？既然已经进来了，就明文给吧，方便修改
+
+	// 补充通信密钥（如果不存在则生成一个）
+	if _, ok := configMap[models.ConfigKeyCommunicationToken]; !ok || configMap[models.ConfigKeyCommunicationToken] == "" {
+		newToken := generateToken("comm")[:16] // 16位随机
+		database.DB.Save(&models.SystemSetting{
+			Key:      models.ConfigKeyCommunicationToken,
+			Value:    newToken,
+			Category: "system",
+		})
+		configMap[models.ConfigKeyCommunicationToken] = newToken
+	}
 
 	c.JSON(http.StatusOK, gin.H{"config": configMap})
 }

@@ -74,13 +74,23 @@ func main() {
 	// --- 鉴权中间件 ---
 	// adminToken 已在上方声明
 	authMiddleware := func(c *gin.Context) {
-		// 确定当前有效的 Admin Token
-		validToken := os.Getenv("STEALTH_ADMIN_TOKEN")
+		// 1. 确定管理员密码
+		adminPass := os.Getenv("STEALTH_ADMIN_TOKEN")
+		var dbSetting models.SystemSetting
+		if err := database.DB.Where("key = ?", models.ConfigKeyAdminPassword).First(&dbSetting).Error; err == nil && dbSetting.Value != "" {
+			adminPass = dbSetting.Value
+		}
 
-		// 如果未配置 Admin Token，则视为不需要鉴权（开发/调试模式）
-		// 如果需要 "admin" 作为默认值，请在启动脚本中显式 export STEALTH_ADMIN_TOKEN=admin
-		if validToken == "" {
-			// 直接放行，但保留 License 检查逻辑
+		// 2. 确定通信密钥
+		commToken := ""
+		var commSetting models.SystemSetting
+		if err := database.DB.Where("key = ?", models.ConfigKeyCommunicationToken).First(&commSetting).Error; err == nil {
+			commToken = commSetting.Value
+		}
+
+		// 如果两者都未配置（极端情况），则视为不需要鉴权
+		if adminPass == "" && commToken == "" {
+			// 直接放行
 		} else {
 			// 获取请求 Token
 			token := c.GetHeader("Authorization")
@@ -88,8 +98,16 @@ func main() {
 				token = c.Query("token")
 			}
 
-			// 验证 Token
-			if token != validToken {
+			// 验证 Token (匹配任意一个即可通过)
+			isAuth := false
+			if adminPass != "" && token == adminPass {
+				isAuth = true
+			}
+			if !isAuth && commToken != "" && token == commToken {
+				isAuth = true
+			}
+
+			if !isAuth {
 				c.AbortWithStatusJSON(401, gin.H{"error": "unauthorized"})
 				return
 			}

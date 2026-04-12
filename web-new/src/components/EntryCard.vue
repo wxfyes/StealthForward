@@ -142,6 +142,16 @@ function copyUpdateCommand() {
   })
 }
 
+function copyInstallCommand() {
+  const token = settings.value['system.communication_token'] || 'YOUR_TOKEN'
+  const host = window.location.origin
+  const cmd = `export CTRL_ADDR='${host}' && export NODE_ID='${props.entry.id}' && export CTRL_TOKEN='${token}' && export CTRL_DOMAIN='${props.entry.domain}' && curl -fsSL https://raw.githubusercontent.com/wangn9900/StealthForward/main/scripts/install.sh | bash -s -- 2`
+  
+  navigator.clipboard.writeText(cmd).then(() => {
+    alert('一键安装/对接命令已复制！\n说明：请在目标中转机(root)执行此命令即可完成对接。')
+  })
+}
+
 function formatBytes(bytes) {
   if (!bytes) return '0 B'
   const k = 1024
@@ -220,6 +230,9 @@ async function clearTraffic() {
         </button>
         <button @click="reprovisionNode" :disabled="provisioning" class="btn-tool" style="color: #6366f1" title="自动化部署 (BBR+对接)">
           <svg class="w-3.5 h-3.5" :class="{'animate-bounce': provisioning}" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+        </button>
+        <button @click="copyInstallCommand" class="btn-tool" style="color: #10b981" title="复制一键安装/对接命令">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" /></svg>
         </button>
         <button @click="copyUpdateCommand" class="btn-tool" title="更新脚本"><svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg></button>
         <button @click="$emit('edit', entry)" class="btn-tool" title="编辑节点"><svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg></button>
