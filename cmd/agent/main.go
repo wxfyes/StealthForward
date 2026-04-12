@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/exec"
@@ -23,8 +24,14 @@ func main() {
 	adminToken := flag.String("token", "", "Admin token for controller authentication")
 	useInternal := flag.Bool("internal", false, "Use internal sing-box core for accurate traffic stats")
 	once := flag.Bool("once", false, "Run once and exit")
+	showVersion := flag.Bool("version", false, "Show version and exit")
 
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Printf("StealthForward Agent Version: %s\n", agent.Version)
+		return
+	}
 
 	// 智能探测内核路径
 	if _, err := os.Stat(*corePath); os.IsNotExist(err) {

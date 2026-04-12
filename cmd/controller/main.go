@@ -2,22 +2,31 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/wangn9900/StealthForward/internal/agent"
 	"github.com/wangn9900/StealthForward/internal/api"
 	"github.com/wangn9900/StealthForward/internal/database"
 	"github.com/wangn9900/StealthForward/internal/license"
+	"github.com/wangn9900/StealthForward/internal/models"
 	"github.com/wangn9900/StealthForward/internal/sync"
 )
 
 func main() {
 	// 0. 解析参数
 	listenAddr := flag.String("addr", ":8090", "Listen address (e.g. :8090 or 127.0.0.1:8090)")
+	showVersion := flag.Bool("version", false, "Show version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Printf("StealthForward Controller Version: %s\n", agent.Version)
+		return
+	}
 
 	// === 授权验证（可选） ===
 	// 管理员模式：设置STEALTH_ADMIN_TOKEN即可使用，不依赖授权服务器
