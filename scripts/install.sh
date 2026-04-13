@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # StealthForward 一键安装脚本
-# 支持 OS: Ubuntu, Debian, CentOS 7+
+# Support OS: Ubuntu, Debian, CentOS 7+, Alpine
 
 # 颜色定义
 RED='\033[0;31m'
@@ -17,6 +17,42 @@ if [ "$EUID" -ne 0 ]; then
   echo -e "${RED}错误: 请使用 root 权限运行此脚本。${NC}"
   exit 1
 fi
+
+# 自动检测系统及初始化系统
+OS_RELEASE=""
+if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    OS_RELEASE=$ID
+elif [ -f /etc/redhat-release ]; then
+    OS_RELEASE="centos"
+elif grep -Eqi "alpine" /etc/issue; then
+    OS_RELEASE="alpine"
+fi
+
+INIT_SYSTEM="systemd"
+if [ "$OS_RELEASE" = "alpine" ] || [ -f /sbin/openrc-run ]; then
+    INIT_SYSTEM="openrc"
+fi
+
+# 服务管理函数封装
+service_command() {
+    local action=$1
+    local service=$2
+    if [ "$INIT_SYSTEM" = "systemd" ]; then
+        systemctl "$action" "$service"
+    else
+        case "$action" in
+            start)   rc-service "$service" start ;;
+            stop)    rc-service "$service" stop ;;
+            restart) rc-service "$service" restart ;;
+            enable)  rc-update add "$service" default ;;
+            disable) rc-update del "$service" default ;;
+            status)  rc-service "$service" status ;;
+            reload)  rc-service "$service" reload ;;
+            daemon-reload) ;; # OpenRC 不需要
+        esac
+    fi
+}
 
 show_logo() {
   clear
@@ -54,12 +90,18 @@ issue_certificate() {
   
   # 1. 安装依赖 (增加 cron，这是 acme.sh installer 报错 Pre-check failed 的常见原因)
   echo -e "${YELLOW}检查并安装 acme.sh 依赖 (socat, curl, cron)...${NC}"
-  if command -v apt-get &> /dev/null; then
+  if [ "$OS_RELEASE" = "alpine" ]; then
+    apk add socat curl dcron
+    service_command enable dcron
+    service_command start dcron
+  elif command -v apt-get &> /dev/null; then
     apt-get update && apt-get install -y socat curl cron
-    systemctl enable cron && systemctl start cron
+    service_command enable cron
+    service_command start cron
   elif command -v yum &> /dev/null; then
     yum install -y socat curl cronie
-    systemctl enable crond && systemctl start crond
+    service_command enable crond
+    service_command start crond
   fi
 
   # 2. 安装 acme.sh
@@ -96,10 +138,10 @@ issue_certificate() {
   else
     echo -e "${RED}Webroot 模式证书申请失败，正在分析原因...${NC}"
     echo -e "${YELLOW}尝试暴力 Standalone 模式 (需要暂时停止 Nginx)...${NC}"
-    systemctl stop nginx
+    service_command stop nginx
     $ACME --issue --server letsencrypt -d $domain --standalone --force >> /var/log/stealth-init.log 2>&1
     local res=$?
-    systemctl start nginx
+    service_command start nginx
     if [ $res -eq 0 ]; then
        mkdir -p /etc/stealthforward/certs/$domain
        $ACME --install-cert -d $domain --fullchain-file /etc/stealthforward/certs/$domain/cert.crt --key-file /etc/stealthforward/certs/$domain/cert.key >> /var/log/stealth-init.log 2>&1
@@ -161,7 +203,7 @@ install_sing_box() {
   echo -e "${YELLOW}正在安装隔离版 Stealth Core (魔改内核)...${NC}"
   
   # 先停止服务，避免文件被占用
-  systemctl stop stealth-core 2>/dev/null
+  service_command stop stealth-core 2>/dev/null
   
   # 从 StealthForward Release 下载魔改版内核
   CORE_NAME="sing-box-mod"
@@ -185,7 +227,7 @@ install_controller() {
   show_logo
   echo -e "${BLUE}开始安装 StealthForward Controller (中控端)...${NC}"
   
-  systemctl stop stealth-controller 2>/dev/null
+  service_command stop stealth-controller 2>/dev/null
   
   mkdir -p $INSTALL_DIR/web
   download_binary "stealth-controller" "stealth-controller"
@@ -210,7 +252,8 @@ install_controller() {
       # 确保安装 unzip
       if ! command -v unzip &> /dev/null; then
           echo -e "${YELLOW}正在安装解压工具...${NC}"
-          if command -v apt-get &> /dev/null; then apt-get update && apt-get install -y unzip
+          if [ "$OS_RELEASE" = "alpine" ]; then apk add unzip
+          elif command -v apt-get &> /dev/null; then apt-get update && apt-get install -y unzip
           elif command -v yum &> /dev/null; then yum install -y unzip
           fi
       fi
@@ -250,7 +293,8 @@ install_controller() {
   echo -e "${GREEN}面板资源同步完成！${NC}"
   
   # 修正：移除单引号以支持变量展开
-  cat > /etc/systemd/system/stealth-controller.service <<EOF
+  if [ "$INIT_SYSTEM" = "systemd" ]; then
+    cat > /etc/systemd/system/stealth-controller.service <<EOF
 [Unit]
 Description=StealthForward Controller Service
 After=network.target
@@ -266,10 +310,28 @@ Restart=on-failure
 [Install]
 WantedBy=multi-user.target
 EOF
+  else
+    cat > /etc/init.d/stealth-controller <<EOF
+#!/sbin/openrc-run
+description="StealthForward Controller Service"
+command="/usr/local/bin/stealth-controller"
+command_user="root"
+directory="/etc/stealthforward"
+command_background="yes"
+pidfile="/run/stealth-controller.pid"
+restart_delay=5
 
-  systemctl daemon-reload
-  systemctl enable stealth-controller
-  systemctl start stealth-controller
+depend() {
+    need net
+    after firewall
+}
+EOF
+    chmod +x /etc/init.d/stealth-controller
+  fi
+
+  service_command daemon-reload
+  service_command enable stealth-controller
+  service_command start stealth-controller
   echo -e "${GREEN}Controller 安装并启动成功！${NC}"
   echo -e "${CYAN}面板地址: http://你的公网IP:8090/dashboard${NC}"
 }
@@ -280,14 +342,16 @@ install_agent() {
     echo -e "${GREEN}检测到 Nginx 已安装，跳过安装步骤。${NC}"
   else
     echo -e "${YELLOW}正在安装 Nginx (用于伪装页和证书申请)...${NC}"
-    if command -v apt-get &> /dev/null; then
+    if [ "$OS_RELEASE" = "alpine" ]; then
+      apk add nginx
+    elif command -v apt-get &> /dev/null; then
       apt-get update && apt-get install -y nginx
     elif command -v yum &> /dev/null; then
       yum install -y nginx
     fi
   fi
-  systemctl enable nginx
-  systemctl start nginx
+  service_command enable nginx
+  service_command start nginx
   
   # 2. 安装魔改版 Sing-box
   install_sing_box
@@ -295,7 +359,7 @@ install_agent() {
   show_logo
   echo -e "${BLUE}开始安装 StealthForward Agent (入口节点端)...${NC}"
   
-  systemctl stop stealth-agent 2>/dev/null
+  service_command stop stealth-agent 2>/dev/null
   
   mkdir -p $INSTALL_DIR/www
   download_binary "stealth-agent" "stealth-agent"
@@ -327,7 +391,8 @@ install_agent() {
   # 4. 证书申请流程 (核心改进)
   issue_certificate "$CTRL_DOMAIN"
 
-  cat > /etc/systemd/system/stealth-agent.service <<EOF
+  if [ "$INIT_SYSTEM" = "systemd" ]; then
+    cat > /etc/systemd/system/stealth-agent.service <<EOF
 [Unit]
 Description=StealthForward Agent Service
 After=network.target
@@ -342,10 +407,28 @@ RestartSec=10
 [Install]
 WantedBy=multi-user.target
 EOF
+  else
+    cat > /etc/init.d/stealth-agent <<EOF
+#!/sbin/openrc-run
+description="StealthForward Agent Service"
+command="$BIN_DIR/stealth-agent"
+command_args="-controller $CTRL_ADDR -node $NODE_ID -dir $INSTALL_DIR/core -www $INSTALL_DIR/www -token $CTRL_TOKEN -fallback-port 8081 -corepath $BIN_DIR/stealth-core -internal"
+command_user="root"
+command_background="yes"
+pidfile="/run/stealth-agent.pid"
+restart_delay=10
 
-  systemctl daemon-reload
-  systemctl enable stealth-agent
-  systemctl start stealth-agent
+depend() {
+    need net
+    after firewall
+}
+EOF
+    chmod +x /etc/init.d/stealth-agent
+  fi
+
+  service_command daemon-reload
+  service_command enable stealth-agent
+  service_command start stealth-agent
   echo -e "${GREEN}Agent 已安装并在后台运行!${NC}"
 }
 
@@ -366,10 +449,11 @@ uninstall_ss_exit() {
 
 uninstall_controller() {
   echo -e "${RED}正在卸载 StealthForward Controller...${NC}"
-  systemctl stop stealth-controller 2>/dev/null
-  systemctl disable stealth-controller 2>/dev/null
+  service_command stop stealth-controller 2>/dev/null
+  service_command disable stealth-controller 2>/dev/null
   rm -f /etc/systemd/system/stealth-controller.service
-  systemctl daemon-reload
+  rm -f /etc/init.d/stealth-controller
+  service_command daemon-reload
   
   rm -f $BIN_DIR/stealth-controller
   rm -f $BIN_DIR/stealth-admin
@@ -387,24 +471,28 @@ uninstall_agent() {
   echo -e "${RED}正在卸载 StealthForward Agent 及相关组件...${NC}"
   
   # 1. 停止并删除 Agent 服务
-  systemctl stop stealth-agent 2>/dev/null
-  systemctl disable stealth-agent 2>/dev/null
+  service_command stop stealth-agent 2>/dev/null
+  service_command disable stealth-agent 2>/dev/null
   rm -f /etc/systemd/system/stealth-agent.service
+  rm -f /etc/init.d/stealth-agent
   rm -f $BIN_DIR/stealth-agent
   
   # 2. 停止并删除 Stealth Core (隔离版内核)
   echo -e "${YELLOW}清理 Stealth Core 核心...${NC}"
-  systemctl stop stealth-core 2>/dev/null
-  systemctl disable stealth-core 2>/dev/null
+  service_command stop stealth-core 2>/dev/null
+  service_command disable stealth-core 2>/dev/null
   rm -f /etc/systemd/system/stealth-core.service
+  rm -f /etc/init.d/stealth-core
   rm -f $BIN_DIR/stealth-core
   rm -rf $INSTALL_DIR/core
   
   # 3. 清理 Nginx 和伪装网站
   read -p "是否卸载 Nginx 并清除伪装网站数据? [y/N]: " del_nginx
   if [[ "$del_nginx" =~ ^[Yy]$ ]]; then
-    systemctl stop nginx 2>/dev/null
-    if command -v apt-get &> /dev/null; then
+    service_command stop nginx 2>/dev/null
+    if [ "$OS_RELEASE" = "alpine" ]; then
+      apk del nginx
+    elif command -v apt-get &> /dev/null; then
       apt-get purge -y nginx nginx-common
       apt-get autoremove -y
     elif command -v yum &> /dev/null; then
@@ -416,7 +504,7 @@ uninstall_agent() {
   
   # 4. 清理主目录
   rm -rf $INSTALL_DIR
-  systemctl daemon-reload
+  service_command daemon-reload
   
   echo -e "${GREEN}Agent 及其关联组件已彻底清除！${NC}"
 }
@@ -453,9 +541,9 @@ if [ -n "$1" ]; then
     --update-agent)
       show_logo
       echo -e "${YELLOW}正在更新 Agent...${NC}"
-      systemctl stop stealth-agent 2>/dev/null
+      service_command stop stealth-agent 2>/dev/null
       download_binary "stealth-agent" "stealth-agent" "$2"
-      systemctl start stealth-agent
+      service_command start stealth-agent
       echo -e "${GREEN}Agent 更新完成并不是重启！${NC}"
       ;;
     1) install_controller ;;
