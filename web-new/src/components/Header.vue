@@ -101,7 +101,7 @@ function resetLicense() {
     </div>
 
     <!-- Controls -->
-    <div class="flex gap-3 items-center">
+    <div class="flex flex-wrap gap-3 items-center w-full md:w-auto">
       
       <!-- Validity Display or Activation Input -->
       <template v-if="expiresAt">
@@ -119,29 +119,31 @@ function resetLicense() {
         </a>
       </template>
       
-      <div v-else class="flex gap-2 animate-fade-in">
+      <div v-else class="flex flex-wrap md:flex-nowrap gap-2 animate-fade-in w-full md:w-auto">
         <input 
           v-model="activKey" 
           type="text" 
           placeholder="输入 License/Smart Key 激活" 
-          class="glass px-3 py-2 rounded-xl text-sm text-white placeholder-gray-400 border border-white/10 focus:border-primary-500 outline-none w-96"
+          class="glass px-3 py-2 rounded-xl text-sm text-white placeholder-gray-400 border border-white/10 focus:border-primary-500 outline-none w-full md:w-96 max-w-full"
         />
-        <button 
-          @click="activate" 
-          :disabled="loadingActiv"
-          class="bg-primary-600 px-4 py-2 rounded-xl text-sm font-bold text-white hover:bg-primary-500 transition disabled:opacity-50"
-        >
-          {{ loadingActiv ? '...' : '激活' }}
-        </button>
-        
-        <!-- Buy License Placeholder -->
-        <a 
-          href="https://t.me/Milkyone_y" 
-          target="_blank"
-          class="glass px-4 py-2 rounded-xl text-sm font-bold text-amber-500 hover:text-amber-400 border border-amber-500/30 flex items-center gap-1 transition hover:bg-amber-500/10"
-        >
-          🛒 购买授权
-        </a>
+        <div class="flex gap-2 w-full md:w-auto">
+          <button 
+            @click="activate" 
+            :disabled="loadingActiv"
+            class="flex-1 md:flex-initial bg-primary-600 px-4 py-2 rounded-xl text-sm font-bold text-white hover:bg-primary-500 transition disabled:opacity-50"
+          >
+            {{ loadingActiv ? '...' : '激活' }}
+          </button>
+          
+          <!-- Buy License Placeholder -->
+          <a 
+            href="https://t.me/Milkyone_y" 
+            target="_blank"
+            class="flex-1 md:flex-initial glass px-4 py-2 rounded-xl text-sm font-bold text-amber-500 hover:text-amber-400 border border-amber-500/30 flex items-center gap-1 transition hover:bg-amber-500/10 text-center justify-center"
+          >
+            🛒 购买
+          </a>
+        </div>
       </div>
 
       <!-- Tab Switcher -->

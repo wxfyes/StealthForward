@@ -379,6 +379,7 @@ async function clearTraffic() {
 .main-btns {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 0.5rem;
 }
 
@@ -502,5 +503,7 @@ async function clearTraffic() {
   .top-row { flex-direction: column; align-items: flex-start; gap: 1rem; }
   .stats-row { flex-direction: column; align-items: stretch; }
   .data-group { grid-template-cols: 1fr 1fr; display: grid; gap: 0.75rem; }
+  .node-brief { flex: 1 1 auto; max-width: 100%; }
+  .clear-btn { opacity: 0.5; }
 }
 </style>

@@ -76,7 +76,7 @@ async function clearTraffic() {
       </div>
       
       <!-- Actions -->
-      <div class="flex gap-1 opacity-0 group-hover:opacity-100 transition relative z-10">
+      <div class="flex gap-1 md:opacity-0 md:group-hover:opacity-100 opacity-100 transition relative z-10">
         <button
           @click="$emit('edit', exit)"
           class="p-1.5 glass rounded-lg text-emerald-400 hover:scale-110 cursor-pointer"

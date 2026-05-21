@@ -72,23 +72,23 @@ function formatBytes(bytes) {
 
 <template>
   <div class="space-y-6 animate-fade-in">
-    <div class="glass p-8 rounded-3xl">
+    <div class="glass p-4 sm:p-8 rounded-3xl">
       <!-- Header -->
-      <div class="flex justify-between items-center mb-8">
+      <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
         <div>
           <h2 class="text-2xl font-bold">多目标分流策略 (Routing Policy)</h2>
           <p class="text-[var(--text-muted)] text-sm">单入口 443 转发上百节点的"心脏" | 根据节点 ID 动态流转</p>
         </div>
         <button
           @click="openAddMapping"
-          class="bg-gradient-to-r from-primary-500 to-purple-600 p-3 px-8 rounded-full text-sm font-bold shadow-lg shadow-primary-500/20 active:scale-95 transition text-white"
+          class="w-full sm:w-auto bg-gradient-to-r from-primary-500 to-purple-600 p-3 px-8 rounded-full text-sm font-bold shadow-lg shadow-primary-500/20 active:scale-95 transition text-white"
         >
           添加分流规则
         </button>
       </div>
 
-      <!-- Table -->
-      <div class="overflow-hidden rounded-2xl border border-[var(--border-color)]">
+      <!-- Table (PC only) -->
+      <div class="hidden md:block overflow-hidden rounded-2xl border border-[var(--border-color)]">
         <table class="w-full text-left border-collapse">
           <thead class="bg-[var(--bg-secondary)] text-[var(--text-muted)] text-xs uppercase tracking-wider font-semibold">
             <tr>
@@ -142,7 +142,7 @@ function formatBytes(bytes) {
                 </span>
               </td>
               <td class="py-4 px-6 text-right">
-                <div class="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition duration-200">
+                <div class="flex justify-end gap-2 md:opacity-0 md:group-hover:opacity-100 opacity-100 transition duration-200">
                   <button
                     @click="openEditMapping(m)"
                     class="p-2 bg-primary-500/10 text-primary-400 rounded-lg hover:bg-primary-500 hover:text-white transition"
@@ -171,6 +171,58 @@ function formatBytes(bytes) {
             </tr>
           </tbody>
         </table>
+      </div>
+
+      <!-- Mobile Card List (Mobile only) -->
+      <div class="block md:hidden space-y-4">
+        <div v-for="m in mappings" :key="m.id" class="p-5 bg-[var(--bg-secondary)]/50 backdrop-blur-md rounded-2xl border border-[var(--border-color)] space-y-3">
+          <div class="flex justify-between items-center pb-2 border-b border-white/5">
+            <div class="flex flex-col">
+              <span class="font-bold text-white">{{ findNodeName('entries', m.entry_node_id) }}</span>
+              <span class="text-[10px] text-[var(--text-muted)]">入口 ID #{{ m.entry_node_id }}</span>
+            </div>
+            <span class="inline-flex items-center px-2.5 py-0.5 rounded-md bg-primary-500/10 text-primary-400 text-xs font-mono border border-primary-500/20">
+              V2B ID: {{ m.v2board_node_id }}
+            </span>
+          </div>
+          
+          <div class="grid grid-cols-2 gap-y-2 gap-x-4 text-xs pt-1">
+            <div class="flex flex-col">
+              <span class="text-[var(--text-muted)] text-[10px] uppercase">目标分流 (Exit)</span>
+              <span class="text-emerald-400 font-medium truncate mt-0.5">{{ findNodeName('exits', m.target_exit_id) }}</span>
+            </div>
+            <div class="flex flex-col">
+              <span class="text-[var(--text-muted)] text-[10px] uppercase">监听端口</span>
+              <span class="text-amber-400 font-mono font-medium mt-0.5">{{ m.port > 0 ? m.port : '跟随入口' }}</span>
+            </div>
+            <div class="flex flex-col">
+              <span class="text-[var(--text-muted)] text-[10px] uppercase">已用流量</span>
+              <span class="text-primary-400 font-mono font-bold mt-0.5">{{ formatBytes(getMappingTraffic(m)) }}</span>
+            </div>
+            <div class="flex flex-col">
+              <span class="text-[var(--text-muted)] text-[10px] uppercase">状态</span>
+              <span class="text-emerald-500 mt-0.5">● 运行中</span>
+            </div>
+          </div>
+          
+          <div class="flex justify-end gap-2 pt-2 border-t border-white/5">
+            <button
+              @click="openEditMapping(m)"
+              class="px-4 py-2 bg-primary-500/10 text-primary-400 rounded-xl text-xs font-bold hover:bg-primary-500 hover:text-white transition flex-1 text-center justify-center"
+            >
+              编辑
+            </button>
+            <button
+              @click="handleDelete(m.id)"
+              class="px-4 py-2 bg-rose-500/10 text-rose-500 rounded-xl text-xs font-bold hover:bg-rose-500 hover:text-white transition flex-1 text-center justify-center"
+            >
+              删除
+            </button>
+          </div>
+        </div>
+        <div v-if="mappings.length === 0" class="py-12 text-center text-[var(--text-muted)] italic text-sm">
+          暂无分流策略，所有流量将默认转发至入口绑定的落地机。
+        </div>
       </div>
     </div>
 
