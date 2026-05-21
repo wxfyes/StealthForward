@@ -533,7 +533,9 @@ func parseDomains(domainsStr string) []string {
 		return []string{
 			"openai.com", "chatgpt.com", "oaistatic.com", "oaiusercontent.com",
 			"gemini.google.com", "generativeai.google", "generativelanguage.googleapis.com", "proactive.google.com", "bard.google.com", "aistudio.google.com",
-			"anthropic.com", "claude.ai",
+			"proactivebackend-pa.googleapis.com", "robinfrontend-pa.googleapis.com", "alkalimilepost-pa.googleapis.com", "assistant-pa.googleapis.com",
+			"anthropic.com", "claude.ai", "claudeusercontent.com",
+			"grok.com", "x.ai",
 		}
 	}
 	var domains []string
@@ -550,7 +552,9 @@ func parseDomains(domainsStr string) []string {
 		return []string{
 			"openai.com", "chatgpt.com", "oaistatic.com", "oaiusercontent.com",
 			"gemini.google.com", "generativeai.google", "generativelanguage.googleapis.com", "proactive.google.com", "bard.google.com", "aistudio.google.com",
-			"anthropic.com", "claude.ai",
+			"proactivebackend-pa.googleapis.com", "robinfrontend-pa.googleapis.com", "alkalimilepost-pa.googleapis.com", "assistant-pa.googleapis.com",
+			"anthropic.com", "claude.ai", "claudeusercontent.com",
+			"grok.com", "x.ai",
 		}
 	}
 	return domains
