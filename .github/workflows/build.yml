@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*' # 当你推送形如 v1.0.0 的 tag 时触发发布
+  workflow_dispatch: # 支持在 GitHub 页面手动点击按钮触发打包
 
 jobs:
   build:
