@@ -374,7 +374,8 @@ async function handleSubmit() {
 
         <div class="md:col-span-2 text-primary-400 font-bold mt-2">解锁域名后缀 (可选)</div>
         <textarea 
-          class="md:col-span-2 p-3 bg-white/5 border border-white/10 rounded-xl text-xs text-white" 
+          class="md:col-span-2 p-3 rounded-2xl text-sm" 
+          style="background: #f4edd9; color: #333333; border: 1px solid #d4c8aa;"
           v-model="form.unlock_domains" 
           rows="3" 
           placeholder="留空时默认解锁：OpenAI / Gemini / Claude

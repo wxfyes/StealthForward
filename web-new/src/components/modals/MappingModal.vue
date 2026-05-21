@@ -113,7 +113,8 @@ async function handleSubmit() {
         <label class="flex flex-col gap-1.5 text-[var(--text-muted)]">
           解锁域名后缀 (可选)
           <textarea 
-            class="p-3 bg-white/5 border border-white/10 rounded-xl text-xs text-white" 
+            class="p-3 rounded-2xl text-sm" 
+            style="background: #f4edd9; color: #333333; border: 1px solid #d4c8aa;"
             v-model="form.unlock_domains" 
             rows="3" 
             placeholder="留空时默认解锁：OpenAI / Gemini / Claude&#10;用换行、空格或逗号分隔各个域名，如：&#10;gemini.google.com&#10;generativeai.google"
