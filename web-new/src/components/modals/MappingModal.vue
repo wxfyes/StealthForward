@@ -19,6 +19,7 @@ const form = ref({
   v2board_type: 'v2ray',
   target_exit_id: null,
   unlock_exit_id: null,
+  unlock_domains: '',
   port: null
 })
 
@@ -53,6 +54,7 @@ async function handleSubmit() {
     v2board_type: form.value.v2board_type || 'v2ray',
     target_exit_id: parseInt(form.value.target_exit_id),
     unlock_exit_id: form.value.unlock_exit_id ? parseInt(form.value.unlock_exit_id) : 0,
+    unlock_domains: form.value.unlock_domains || '',
     port: form.value.port || 0
   }
   
@@ -106,6 +108,16 @@ async function handleSubmit() {
             <option :value="0">不启用解锁分流（全部走上方落地）</option>
             <option v-for="ex in exits" :key="ex.id" :value="ex.id">🔑 解锁分流：{{ ex.name }}</option>
           </select>
+        </label>
+
+        <label class="flex flex-col gap-1.5 text-[var(--text-muted)]">
+          解锁域名后缀 (可选)
+          <textarea 
+            class="p-3 bg-white/5 border border-white/10 rounded-xl text-xs text-white" 
+            v-model="form.unlock_domains" 
+            rows="3" 
+            placeholder="留空时默认解锁：OpenAI / Gemini / Claude&#10;用换行、空格或逗号分隔各个域名，如：&#10;gemini.google.com&#10;generativeai.google"
+          ></textarea>
         </label>
         
         <label class="flex flex-col gap-1.5 text-[var(--text-muted)]">

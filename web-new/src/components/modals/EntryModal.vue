@@ -33,6 +33,7 @@ const form = ref({
   fallback: '127.0.0.1:80',
   target_exit_id: 0,
   unlock_exit_id: 0,
+  unlock_domains: '',
   v2board_url: '',
   v2board_key: '',
   v2board_node_id: null,
@@ -370,6 +371,17 @@ async function handleSubmit() {
           <option :value="0">不启用解锁分流（全部走上方落地）</option>
           <option v-for="ex in exits" :key="ex.id" :value="ex.id">🔑 解锁分流：{{ ex.name }}</option>
         </select>
+
+        <div class="md:col-span-2 text-primary-400 font-bold mt-2">解锁域名后缀 (可选)</div>
+        <textarea 
+          class="md:col-span-2 p-3 bg-white/5 border border-white/10 rounded-xl text-xs text-white" 
+          v-model="form.unlock_domains" 
+          rows="3" 
+          placeholder="留空时默认解锁：OpenAI / Gemini / Claude
+用换行、空格或逗号分隔各个域名，如：
+gemini.google.com
+generativeai.google"
+        ></textarea>
       </div>
       
       <div class="flex gap-4 mt-8">

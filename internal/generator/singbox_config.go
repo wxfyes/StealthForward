@@ -435,13 +435,9 @@ func GenerateEntryConfig(entry *models.EntryNode, rules []models.ForwardingRule,
 		}
 		if unlockExitName != "" {
 			routingRules = append(routingRules, map[string]interface{}{
-				"inbound":  []string{defaultInboundTag},
-				"domain_suffix": []string{
-					"openai.com", "chatgpt.com", "oaistatic.com", "oaiusercontent.com",
-					"gemini.google.com", "generativeai.google", "generativelanguage.googleapis.com", "proactive.google.com", "bard.google.com", "aistudio.google.com",
-					"anthropic.com", "claude.ai",
-				},
-				"outbound": "out-" + unlockExitName,
+				"inbound":       []string{defaultInboundTag},
+				"domain_suffix": parseDomains(entry.UnlockDomains),
+				"outbound":      "out-" + unlockExitName,
 			})
 		}
 	}
@@ -468,13 +464,9 @@ func GenerateEntryConfig(entry *models.EntryNode, rules []models.ForwardingRule,
 			}
 			if unlockExitName != "" {
 				routingRules = append(routingRules, map[string]interface{}{
-					"inbound":  []string{inboundTag},
-					"domain_suffix": []string{
-						"openai.com", "chatgpt.com", "oaistatic.com", "oaiusercontent.com",
-						"gemini.google.com", "generativeai.google", "generativelanguage.googleapis.com", "proactive.google.com", "bard.google.com", "aistudio.google.com",
-						"anthropic.com", "claude.ai",
-					},
-					"outbound": "out-" + unlockExitName,
+					"inbound":       []string{inboundTag},
+					"domain_suffix": parseDomains(m.UnlockDomains),
+					"outbound":      "out-" + unlockExitName,
 				})
 			}
 		}
@@ -533,4 +525,33 @@ func applyAnyTLSConfig(inbound map[string]interface{}, paddingScheme string, con
 		fmt.Printf("[Generator] ERROR: PaddingScheme is NOT a valid JSON string array: %v\n", err)
 		log.Printf("[Generator] ERROR: PaddingScheme parsing failed for %s", contextInfos)
 	}
+}
+
+// parseDomains 解析自定义解锁域名。如果为空，则使用默认的 AI 解锁域名列表
+func parseDomains(domainsStr string) []string {
+	if strings.TrimSpace(domainsStr) == "" {
+		return []string{
+			"openai.com", "chatgpt.com", "oaistatic.com", "oaiusercontent.com",
+			"gemini.google.com", "generativeai.google", "generativelanguage.googleapis.com", "proactive.google.com", "bard.google.com", "aistudio.google.com",
+			"anthropic.com", "claude.ai",
+		}
+	}
+	var domains []string
+	rawList := strings.FieldsFunc(domainsStr, func(r rune) bool {
+		return r == ',' || r == '\n' || r == '\r' || r == ';' || r == ' '
+	})
+	for _, item := range rawList {
+		trimmed := strings.TrimSpace(item)
+		if trimmed != "" {
+			domains = append(domains, trimmed)
+		}
+	}
+	if len(domains) == 0 {
+		return []string{
+			"openai.com", "chatgpt.com", "oaistatic.com", "oaiusercontent.com",
+			"gemini.google.com", "generativeai.google", "generativelanguage.googleapis.com", "proactive.google.com", "bard.google.com", "aistudio.google.com",
+			"anthropic.com", "claude.ai",
+		}
+	}
+	return domains
 }
