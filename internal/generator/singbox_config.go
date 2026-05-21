@@ -436,7 +436,11 @@ func GenerateEntryConfig(entry *models.EntryNode, rules []models.ForwardingRule,
 		if unlockExitName != "" {
 			routingRules = append(routingRules, map[string]interface{}{
 				"inbound":  []string{defaultInboundTag},
-				"geosite":  []string{"openai", "google-gemini", "netflix"}, // 内置主流AI及流媒体规则
+				"domain_suffix": []string{
+					"openai.com", "chatgpt.com", "oaistatic.com", "oaiusercontent.com",
+					"gemini.google.com", "google-gemini.com", "proactive.google.com",
+					"anthropic.com", "claude.ai",
+				},
 				"outbound": "out-" + unlockExitName,
 			})
 		}
@@ -465,7 +469,11 @@ func GenerateEntryConfig(entry *models.EntryNode, rules []models.ForwardingRule,
 			if unlockExitName != "" {
 				routingRules = append(routingRules, map[string]interface{}{
 					"inbound":  []string{inboundTag},
-					"geosite":  []string{"openai", "google-gemini", "netflix"},
+					"domain_suffix": []string{
+						"openai.com", "chatgpt.com", "oaistatic.com", "oaiusercontent.com",
+						"gemini.google.com", "google-gemini.com", "proactive.google.com",
+						"anthropic.com", "claude.ai",
+					},
 					"outbound": "out-" + unlockExitName,
 				})
 			}
