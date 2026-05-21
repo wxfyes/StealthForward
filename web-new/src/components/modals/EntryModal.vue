@@ -32,6 +32,7 @@ const form = ref({
   key_body: '',
   fallback: '127.0.0.1:80',
   target_exit_id: 0,
+  unlock_exit_id: 0,
   v2board_url: '',
   v2board_key: '',
   v2board_node_id: null,
@@ -361,6 +362,13 @@ async function handleSubmit() {
         <select class="md:col-span-2" v-model.number="form.target_exit_id">
           <option :value="0">不绑定 (所有用户将无法连接)</option>
           <option v-for="ex in exits" :key="ex.id" :value="ex.id">{{ ex.name }} — 发往此机器</option>
+        </select>
+
+        <div class="md:col-span-2 text-primary-400 font-bold mt-2">解锁落地机 (可选)</div>
+        
+        <select class="md:col-span-2" v-model.number="form.unlock_exit_id">
+          <option :value="0">不启用解锁分流（全部走上方落地）</option>
+          <option v-for="ex in exits" :key="ex.id" :value="ex.id">🔑 解锁分流：{{ ex.name }}</option>
         </select>
       </div>
       

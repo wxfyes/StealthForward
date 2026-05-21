@@ -418,10 +418,28 @@ func GenerateEntryConfig(entry *models.EntryNode, rules []models.ForwardingRule,
 
 	config.Outbounds = append(config.Outbounds, map[string]interface{}{"tag": "block", "type": "block"})
 
-	// Routing - 按端口分流
+	// Routing - 按端口分流与前置解锁分流
 	routingRules := []interface{}{
 		map[string]interface{}{"ip_cidr": []string{"127.0.0.1/32"}, "outbound": "direct"},
 		map[string]interface{}{"protocol": "dns", "outbound": "direct"},
+	}
+
+	// 1. 如果主入口配置了分流解锁
+	if entry.UnlockExitID != 0 {
+		var unlockExitName string
+		for _, e := range exits {
+			if e.ID == entry.UnlockExitID {
+				unlockExitName = e.Name
+				break
+			}
+		}
+		if unlockExitName != "" {
+			routingRules = append(routingRules, map[string]interface{}{
+				"inbound":  []string{defaultInboundTag},
+				"geosite":  []string{"openai", "google-gemini", "netflix"}, // 内置主流AI及流媒体规则
+				"outbound": "out-" + unlockExitName,
+			})
+		}
 	}
 
 	var mappingPorts []int
@@ -430,9 +448,30 @@ func GenerateEntryConfig(entry *models.EntryNode, rules []models.ForwardingRule,
 	}
 	sort.Ints(mappingPorts)
 
+	// 2. 为每个端口配置路由规则
 	for _, port := range mappingPorts {
 		m := portToMapping[port]
 		inboundTag := fmt.Sprintf("node_%d_port_%d", entry.ID, port)
+		
+		// 2.1 如果分流端口配置了独立的解锁落地
+		if m.UnlockExitID != 0 {
+			var unlockExitName string
+			for _, e := range exits {
+				if e.ID == m.UnlockExitID {
+					unlockExitName = e.Name
+					break
+				}
+			}
+			if unlockExitName != "" {
+				routingRules = append(routingRules, map[string]interface{}{
+					"inbound":  []string{inboundTag},
+					"geosite":  []string{"openai", "google-gemini", "netflix"},
+					"outbound": "out-" + unlockExitName,
+				})
+			}
+		}
+
+		// 2.2 普通流量直接转发至目标落地
 		var exitName string
 		for _, e := range exits {
 			if e.ID == m.TargetExitID {

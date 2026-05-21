@@ -16,6 +16,7 @@ type EntryNode struct {
 	Fallback      string `json:"fallback"`       // 回落地址，例如 "127.0.0.1:8080"
 	CertTask      bool   `json:"cert_task"`      // 是否有待处理的证书申请任务
 	TargetExitID  uint   `json:"target_exit_id"` // 默认的一键转落地节点 ID（作为备用）
+	UnlockExitID  uint   `json:"unlock_exit_id"`  // 解锁落地节点 ID (可选)
 	Protocol      string `json:"protocol"`       // anytls, vless, vmess, trojan
 	Transport     string `json:"transport"`      // tcp, grpc, ws, h2 (传输层类型)
 	GrpcService   string `json:"grpc_service"`   // gRPC service name (如 "grpc")
@@ -56,6 +57,7 @@ type NodeMapping struct {
 	EntryNodeID   uint      `json:"entry_node_id"`   // 关联入口节点
 	V2boardNodeID int       `json:"v2board_node_id"` // V2Board 那边的节点 ID
 	TargetExitID  uint      `json:"target_exit_id"`  // 对应的落地节点 ID
+	UnlockExitID  uint      `json:"unlock_exit_id"`  // 解锁落地节点 ID (可选)
 	V2boardType   string    `json:"v2board_type"`    // 节点类型
 	Port          int       `json:"port"`            // 该映射独立监听的端口（为 0 时使用入口默认端口）
 	CreatedAt     time.Time `json:"created_at"`

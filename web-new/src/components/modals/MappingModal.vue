@@ -18,6 +18,7 @@ const form = ref({
   v2board_node_id: null,
   v2board_type: 'v2ray',
   target_exit_id: null,
+  unlock_exit_id: null,
   port: null
 })
 
@@ -51,6 +52,7 @@ async function handleSubmit() {
     v2board_node_id: parseInt(form.value.v2board_node_id),
     v2board_type: form.value.v2board_type || 'v2ray',
     target_exit_id: parseInt(form.value.target_exit_id),
+    unlock_exit_id: form.value.unlock_exit_id ? parseInt(form.value.unlock_exit_id) : 0,
     port: form.value.port || 0
   }
   
@@ -95,6 +97,14 @@ async function handleSubmit() {
           目标落地出口
           <select v-model.number="form.target_exit_id">
             <option v-for="ex in exits" :key="ex.id" :value="ex.id">{{ ex.name }}</option>
+          </select>
+        </label>
+        
+        <label class="flex flex-col gap-1.5 text-[var(--text-muted)]">
+          解锁落地出口 (可选)
+          <select v-model.number="form.unlock_exit_id">
+            <option :value="0">不启用解锁分流（全部走上方落地）</option>
+            <option v-for="ex in exits" :key="ex.id" :value="ex.id">🔑 解锁分流：{{ ex.name }}</option>
           </select>
         </label>
         
