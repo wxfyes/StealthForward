@@ -25,7 +25,7 @@ jobs:
       - name: Clone Required Sing-box Lib
         run: |
           # Clone to ../sing-box_mod to match go.mod replace directive
-          git clone --depth 1 --branch dev-next https://github.com/wangn9900/sing-box_mod.git ../sing-box_mod
+          git clone --depth 1 --branch dev-next https://github.com/wxfyes/sing-box_mod.git ../sing-box_mod
 
       - name: Build StealthForward Binaries
         run: |

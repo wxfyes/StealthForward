@@ -12,6 +12,22 @@ PURPLE='\033[0;35m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
+# --- 私有仓库 Auth 支持 ---
+GH_AUTH_HEADER=""
+if [ -n "$GH_TOKEN" ]; then
+    GH_AUTH_HEADER="Authorization: token $GH_TOKEN"
+    echo -e "${GREEN}检测到 GH_TOKEN，已启用私有仓库认证模式${NC}"
+fi
+
+# 通用 GitHub API/Raw 请求封装
+gh_curl() {
+    if [ -n "$GH_AUTH_HEADER" ]; then
+        curl -H "$GH_AUTH_HEADER" "$@"
+    else
+        curl "$@"
+    fi
+}
+
 # 检查权限
 if [ "$EUID" -ne 0 ]; then
   echo -e "${RED}错误: 请使用 root 权限运行此脚本。${NC}"
@@ -155,7 +171,7 @@ issue_certificate() {
 }
 
 # 核心变量
-REPO="wangn9900/StealthForward"
+REPO="wxfyes/StealthForward"
 INSTALL_DIR="/etc/stealthforward"
 BIN_DIR="/usr/local/bin"
 
@@ -177,18 +193,35 @@ download_binary() {
     LATEST_TAG="$force_tag"
   else
     echo -e "${YELLOW}正在探测最新版本...${NC}"
-    LATEST_TAG=$(curl -s "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+    LATEST_TAG=$(gh_curl -s "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
   fi
   
   if [ -z "$LATEST_TAG" ]; then
-    echo -e "${RED}无法获取版本号，请检查网络。${NC}"
+    echo -e "${RED}无法获取版本号，请检查网络或 GITHUB_TOKEN 配置。${NC}"
     exit 1
   fi
 
   echo -e "${YELLOW}正在下载 $name ($LATEST_TAG | $PLATFORM)...${NC}"
-  URL="https://github.com/$REPO/releases/download/$LATEST_TAG/${name}-${PLATFORM}"
   
-  curl -L -f -o "$BIN_DIR/$target_name" "$URL"
+  # 对于私有仓库，Release 下载需要特殊处理 (通过 API 或者 带 Authorization 的重定向)
+  # 这里尝试带 Token 的 API 下载方式
+  if [ -n "$GH_TOKEN" ]; then
+    # 获取 Asset ID
+    ASSET_ID=$(gh_curl -s "https://api.github.com/repos/$REPO/releases/tags/$LATEST_TAG" | grep -B 1 "\"name\": \"${name}-${PLATFORM}\"" | grep '"id":' | head -n 1 | sed -E 's/.*: ([0-9]+),.*/\1/')
+    if [ -n "$ASSET_ID" ]; then
+        echo -e "${CYAN}通过 API 下载 Asset (ID: $ASSET_ID)...${NC}"
+        gh_curl -L -f -H "Accept: application/octet-stream" \
+             -o "$BIN_DIR/$target_name" \
+             "https://api.github.com/repos/$REPO/releases/assets/$ASSET_ID"
+    else
+        # 降级：尝试普通 URL
+        URL="https://github.com/$REPO/releases/download/$LATEST_TAG/${name}-${PLATFORM}"
+        gh_curl -L -f -o "$BIN_DIR/$target_name" "$URL"
+    fi
+  else
+    URL="https://github.com/$REPO/releases/download/$LATEST_TAG/${name}-${PLATFORM}"
+    curl -L -f -o "$BIN_DIR/$target_name" "$URL"
+  fi
   
   if [ $? -eq 0 ]; then
     chmod +x "$BIN_DIR/$target_name"
@@ -214,7 +247,12 @@ install_sing_box() {
   
   echo -e "${CYAN}正在下载内核到 $CORE_PATH...${NC}"
   # 自动检测架构下载二进制
-  curl -Lo "$CORE_PATH" "https://github.com/$REPO/releases/latest/download/sing-box-mod-$PLATFORM"
+  if [ -n "$GH_TOKEN" ]; then
+     # 复用上面的 API 下载逻辑或探测 Asset
+     download_binary "sing-box-mod" "stealth-core"
+  else
+     curl -Lo "$CORE_PATH" "https://github.com/$REPO/releases/latest/download/sing-box-mod-$PLATFORM"
+  fi
   
   chmod +x "$CORE_PATH"
   echo -e "${GREEN}隔离版内核安装成功!${NC}"
@@ -239,14 +277,25 @@ install_controller() {
 
   echo -e "${YELLOW}正在同步可视化面板资源...${NC}"
   
-  # 获取最新 Release Tag (用于拼接下载链接)
-  LATEST_TAG=$(curl -s "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
-  
   # 优先尝试从 Release 下载 web.zip (由 CI 自动构建)
-  ZIP_URL="https://github.com/$REPO/releases/download/$LATEST_TAG/web.zip"
+  ZIP_NAME="web.zip"
   DOWNLOAD_SUCCESS=0
 
-  if [ -n "$LATEST_TAG" ] && curl -L --fail --connect-timeout 10 -o "$INSTALL_DIR/web.zip" "$ZIP_URL"; then
+  if [ -n "$LATEST_TAG" ]; then
+      if [ -n "$GH_TOKEN" ]; then
+          ASSET_ID=$(gh_curl -s "https://api.github.com/repos/$REPO/releases/tags/$LATEST_TAG" | grep -B 1 "\"name\": \"$ZIP_NAME\"" | grep '"id":' | head -n 1 | sed -E 's/.*: ([0-9]+),.*/\1/')
+          if [ -n "$ASSET_ID" ]; then
+             gh_curl -L -f -H "Accept: application/octet-stream" -o "$INSTALL_DIR/web.zip" "https://api.github.com/repos/$REPO/releases/assets/$ASSET_ID" && DOWNLOAD_SUCCESS=1
+          fi
+      fi
+      
+      if [ $DOWNLOAD_SUCCESS -eq 0 ]; then
+          ZIP_URL="https://github.com/$REPO/releases/download/$LATEST_TAG/web.zip"
+          gh_curl -L --fail --connect-timeout 10 -o "$INSTALL_DIR/web.zip" "$ZIP_URL" && DOWNLOAD_SUCCESS=1
+      fi
+  fi
+
+  if [ $DOWNLOAD_SUCCESS -eq 1 ]; then
       echo -e "${GREEN}成功下载前端资源包 ($LATEST_TAG)，正在解压...${NC}"
       
       # 确保安装 unzip
@@ -273,19 +322,19 @@ install_controller() {
       echo -e "${YELLOW}未检测到 Release 资源包，切换到源码同步模式 (Fallback)...${NC}"
       
       # 下载 index.html
-      curl -L -f -o "$INSTALL_DIR/web/index.html" "https://raw.githubusercontent.com/$REPO/main/web/index.html"
+      gh_curl -L -f -o "$INSTALL_DIR/web/index.html" "https://raw.githubusercontent.com/$REPO/main/web/index.html"
       
       # 下载 Vite 构建的 assets 目录
       mkdir -p $INSTALL_DIR/web/assets
       ASSETS_URL="https://api.github.com/repos/$REPO/contents/web/assets?ref=main"
-      ASSETS_LIST=$(curl -s "$ASSETS_URL" | grep '"name"' | sed -E 's/.*"name": "([^"]+)".*/\1/')
+      ASSETS_LIST=$(gh_curl -s "$ASSETS_URL" | grep '"name"' | sed -E 's/.*"name": "([^"]+)".*/\1/')
       
       if [ -z "$ASSETS_LIST" ]; then
          echo -e "${RED}警告：无法获取 assets 列表，面板可能无法加载。${NC}"
       else
          for FILE in $ASSETS_LIST; do
             echo -e "${CYAN}  下载 assets/$FILE ...${NC}"
-            curl -L -f -o "$INSTALL_DIR/web/assets/$FILE" "https://raw.githubusercontent.com/$REPO/main/web/assets/$FILE"
+            gh_curl -L -f -o "$INSTALL_DIR/web/assets/$FILE" "https://raw.githubusercontent.com/$REPO/main/web/assets/$FILE"
          done
       fi
   fi
@@ -435,16 +484,25 @@ EOF
 install_ss_exit() {
   show_logo
   echo -e "${BLUE}开始安装 Shadowsocks 落地转发端 (Exit)...${NC}"
-  echo -e "${YELLOW}该功能会启动一个独立的 SS 服务，不影响现有的其他代理服务。${NC}\n"
   
-  # 直接调用专用的 SS 安装脚本
-  bash <(curl -fsSL https://raw.githubusercontent.com/$REPO/main/scripts/ss-install.sh)
+  # 优先检测本地脚本
+  local SCRIPT_PATH="./scripts/ss-install.sh"
+  if [ -f "$SCRIPT_PATH" ]; then
+    bash "$SCRIPT_PATH"
+  else
+    # 传递 GH_TOKEN 给子脚本
+    GH_TOKEN=$GH_TOKEN bash <(gh_curl -fsSL "https://raw.githubusercontent.com/$REPO/main/scripts/ss-install.sh")
+  fi
 }
 
 uninstall_ss_exit() {
   echo -e "${RED}正在清理 Shadowsocks 落地转发端...${NC}"
-  # 直接调用专用脚本的卸载参数
-  bash <(curl -fsSL https://raw.githubusercontent.com/$REPO/main/scripts/ss-install.sh) uninstall
+  local SCRIPT_PATH="./scripts/ss-install.sh"
+  if [ -f "$SCRIPT_PATH" ]; then
+    bash "$SCRIPT_PATH" uninstall
+  else
+    GH_TOKEN=$GH_TOKEN bash <(gh_curl -fsSL "https://raw.githubusercontent.com/$REPO/main/scripts/ss-install.sh") uninstall
+  fi
 }
 
 uninstall_controller() {
