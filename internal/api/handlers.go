@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/wangn9900/StealthForward/internal/cloud"
@@ -252,8 +253,27 @@ func UploadCertHandler(c *gin.Context) {
 		return
 	}
 
-	var entry models.EntryNode
-	if err := database.DB.Where("domain = ?", req.Domain).First(&entry).Error; err != nil {
+	var entries []models.EntryNode
+	if err := database.DB.Find(&entries).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to query entries"})
+		return
+	}
+
+	var entry *models.EntryNode
+	for i := range entries {
+		dbDomains := strings.Split(entries[i].Domain, ",")
+		for _, d := range dbDomains {
+			if strings.TrimSpace(d) == req.Domain {
+				entry = &entries[i]
+				break
+			}
+		}
+		if entry != nil {
+			break
+		}
+	}
+
+	if entry == nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "node not found"})
 		return
 	}
@@ -266,7 +286,7 @@ func UploadCertHandler(c *gin.Context) {
 	entry.Certificate = "/etc/stealthforward/certs/" + req.Domain + "/cert.crt"
 	entry.Key = "/etc/stealthforward/certs/" + req.Domain + "/cert.key"
 
-	database.DB.Save(&entry)
+	database.DB.Save(entry)
 
 	c.JSON(http.StatusOK, gin.H{"message": "证书备份成功"})
 }

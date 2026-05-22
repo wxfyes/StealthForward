@@ -433,18 +433,31 @@ func (a *Agent) RunOnce() {
 	}
 
 	// 2. 检查是否有证书申请任务，或者本地证书已失效 (主动防御)
-	shouldIssue := result.CertTask
-	if !shouldIssue && result.Domain != "" {
-		certPath := "/etc/stealthforward/certs/" + result.Domain + "/cert.crt"
-		if a.isCertExpiredSoon(certPath, 7) {
-			log.Printf("[Auto-Check] Certificate for %s missing or expiring soon, triggering auto-renewal.", result.Domain)
-			shouldIssue = true
+	if result.Domain != "" {
+		rawDomains := strings.Split(result.Domain, ",")
+		var domains []string
+		for _, d := range rawDomains {
+			trimmed := strings.TrimSpace(d)
+			if trimmed != "" {
+				domains = append(domains, trimmed)
+			}
 		}
-	}
 
-	if shouldIssue && result.Domain != "" {
-		log.Printf("Starting certificate issuance for domain: %s (Task: %v, CF_DNS: %v)", result.Domain, result.CertTask, result.CfToken != "")
-		go a.IssueCertLocally(result.Domain, result.CfToken)
+		for _, domain := range domains {
+			shouldIssue := result.CertTask
+			if !shouldIssue {
+				certPath := "/etc/stealthforward/certs/" + domain + "/cert.crt"
+				if a.isCertExpiredSoon(certPath, 7) {
+					log.Printf("[Auto-Check] Certificate for %s missing or expiring soon, triggering auto-renewal.", domain)
+					shouldIssue = true
+				}
+			}
+
+			if shouldIssue {
+				log.Printf("Starting certificate issuance for domain: %s (Task: %v, CF_DNS: %v)", domain, result.CertTask, result.CfToken != "")
+				go a.IssueCertLocally(domain, result.CfToken)
+			}
+		}
 	}
 
 	// 3. 应用配置

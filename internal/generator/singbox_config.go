@@ -241,9 +241,31 @@ func GenerateEntryConfig(entry *models.EntryNode, rules []models.ForwardingRule,
 		// Reality 不需要本地证书路径
 	} else {
 		// 标准 TLS 模式
-		tlsConfig["server_name"] = entry.Domain
-		tlsConfig["certificate_path"] = certPath
-		tlsConfig["key_path"] = keyPath
+		rawDomains := strings.Split(entry.Domain, ",")
+		var domains []string
+		for _, d := range rawDomains {
+			trimmed := strings.TrimSpace(d)
+			if trimmed != "" {
+				domains = append(domains, trimmed)
+			}
+		}
+
+		if len(domains) > 1 {
+			var certs []map[string]interface{}
+			for _, d := range domains {
+				dCertPath := "/etc/stealthforward/certs/" + d + "/cert.crt"
+				dKeyPath := "/etc/stealthforward/certs/" + d + "/cert.key"
+				certs = append(certs, map[string]interface{}{
+					"certificate_path": dCertPath,
+					"key_path":         dKeyPath,
+				})
+			}
+			tlsConfig["certificates"] = certs
+		} else if len(domains) == 1 {
+			tlsConfig["server_name"] = domains[0]
+			tlsConfig["certificate_path"] = certPath
+			tlsConfig["key_path"] = keyPath
+		}
 	}
 
 	// Shadowsocks 不使用 TLS
