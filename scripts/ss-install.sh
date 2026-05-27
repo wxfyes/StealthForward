@@ -85,8 +85,50 @@ function install_ss() {
         echo -e "${GREEN}已锁定核心: $SB_BIN (模式: $SB_TYPE)${PLAIN}"
     else
         echo -e "${BLUE}未检测到兼容核心，正在为您安装隔离版内核...${PLAIN}"
-        bash <(curl -fsSL https://sing-box.app/install.sh)
-        SB_BIN=$(command -v sing-box || echo "/usr/bin/sing-box")
+        # 尝试使用官方脚本安装
+        if bash <(curl -fsSL https://sing-box.app/install.sh) 2>/dev/null && command -v sing-box &>/dev/null; then
+            SB_BIN=$(command -v sing-box)
+        else
+            # 官方脚本失败时，启用稳健的静态二进制下载兜底（完美支持 Alpine / NAT 小鸡）
+            echo -e "${YELLOW}官方脚本安装失败，正在通过静态二进制压缩包进行兜底安装...${PLAIN}"
+            ARCH=$(uname -m)
+            URL_ARCH="amd64"
+            if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
+                URL_ARCH="arm64"
+            elif [ "$ARCH" = "s390x" ]; then
+                URL_ARCH="s390x"
+            elif [ "$ARCH" = "riscv64" ]; then
+                URL_ARCH="riscv64"
+            fi
+            
+            VERSION="1.13.12"
+            TEMP_DIR="/tmp/singbox_install"
+            mkdir -p $TEMP_DIR
+            
+            echo -e "${BLUE}正在下载 sing-box v${VERSION} (${URL_ARCH}) 静态二进制...${PLAIN}"
+            DOWNLOAD_URL="https://github.com/SagerNet/sing-box/releases/download/v${VERSION}/sing-box-${VERSION}-linux-${URL_ARCH}.tar.gz"
+            
+            if curl -Lo "$TEMP_DIR/sing-box.tar.gz" "$DOWNLOAD_URL" || wget -O "$TEMP_DIR/sing-box.tar.gz" "$DOWNLOAD_URL"; then
+                tar -zxf "$TEMP_DIR/sing-box.tar.gz" -C "$TEMP_DIR"
+                EXTRACTED_BIN=$(find "$TEMP_DIR" -type f -name "sing-box" | head -n 1)
+                if [ -n "$EXTRACTED_BIN" ]; then
+                    mv -f "$EXTRACTED_BIN" /usr/bin/sing-box
+                    chmod +x /usr/bin/sing-box
+                    echo -e "${GREEN}静态内核安装成功：/usr/bin/sing-box${PLAIN}"
+                    SB_BIN="/usr/bin/sing-box"
+                else
+                    echo -e "${RED}解压后未找到二进制文件！${PLAIN}"
+                fi
+            else
+                echo -e "${RED}下载 sing-box 静态二进制失败，请检查网络！${PLAIN}"
+            fi
+            rm -rf $TEMP_DIR
+        fi
+        
+        if [ -z "$SB_BIN" ] || [ ! -f "$SB_BIN" ]; then
+            echo -e "${RED}内核安装失败，无法继续，请检查系统环境或手动安装 sing-box。${PLAIN}"
+            exit 1
+        fi
         SB_TYPE="native"
     fi
 
