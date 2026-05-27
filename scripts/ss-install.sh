@@ -50,13 +50,15 @@ function install_ss() {
     SB_BIN=""
     SB_TYPE="native" # 默认为原生 sing-box
 
-    # 优先检测二进制路径，而不是通过 command -v (避开 /usr/bin/ 脚本)
+    # 优先检测二进制路径，并且通过实际试运行验证其是否可用 (防止在 Alpine 等系统上因为动态链接缺失报 not found 误判)
     POTENTIAL_BINS=("/usr/local/tox/tox" "/usr/local/V2bX/V2bX" "/usr/bin/sing-box" "/usr/local/bin/sing-box")
     
     for bin in "${POTENTIAL_BINS[@]}"; do
         if [ -f "$bin" ] && [ -x "$bin" ]; then
-            # 这是一个关键判断：如果是 tox 或 V2bX，它们通常是二进制文件
-            # 我们通过尝试运行 version 查看其输出特征
+            # 实际试运行以检查动态库依赖是否满足
+            if ! "$bin" version &>/dev/null; then
+                continue
+            fi
             if "$bin" version 2>&1 | grep -qiE "tox|V2bX"; then
                 SB_BIN="$bin"
                 SB_TYPE="v2bx"
@@ -71,11 +73,11 @@ function install_ss() {
     done
 
     if [ -z "$SB_BIN" ]; then
-        # 兜底检测
-        if command -v sing-box &> /dev/null; then
+        # 兜底检测 (同样必须试运行测试，避免 command -v 误判因 libc 缺失而无法执行的残留二进制)
+        if command -v sing-box &> /dev/null && "$(command -v sing-box)" version &>/dev/null; then
             SB_BIN=$(command -v sing-box)
             SB_TYPE="native"
-        elif command -v tox &> /dev/null && [ ! -f /usr/bin/tox ]; then # 确保不是脚本
+        elif command -v tox &> /dev/null && [ ! -f /usr/bin/tox ] && "$(command -v tox)" version &>/dev/null; then
             SB_BIN=$(command -v tox)
             SB_TYPE="v2bx"
         fi
