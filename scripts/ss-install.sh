@@ -35,14 +35,23 @@ function install_ss() {
     [ -z "$PORT" ] && PORT=23036
 
     # 依赖检查与安装 (兼容 Alpine/Ubuntu/CentOS)
-    if ! command -v openssl &> /dev/null; then
-        echo -e "${YELLOW}检测到缺少 openssl，正在尝试自动安装...${PLAIN}"
-        if command -v apk &> /dev/null; then
-            apk update && apk add openssl
-        elif command -v apt-get &> /dev/null; then
-            apt-get update && apt-get install -y openssl
-        elif command -v yum &> /dev/null; then
-            yum install -y openssl
+    if command -v apk &> /dev/null; then
+        echo -e "${YELLOW}检测到 Alpine 环境，正在自动预装排查工具与运行兼容环境 (openssl, curl, tar, iproute2, gcompat)...${PLAIN}"
+        # 一键安装：openssl(解密)、curl(网络)、tar(解压)、iproute2(提供 ss 端口排查)、gcompat(glibc二进制兼容)
+        apk update && apk add openssl curl tar iproute2 gcompat --no-cache || true
+    else
+        # 其他 Linux 系统的依赖安装
+        if ! command -v openssl &> /dev/null; then
+            echo -e "${YELLOW}检测到缺少 openssl，正在尝试自动安装...${PLAIN}"
+            if command -v apt-get &> /dev/null; then
+                apt-get update && apt-get install -y openssl
+            elif command -v yum &> /dev/null; then
+                yum install -y openssl
+            fi
+        fi
+        if ! command -v ss &> /dev/null; then
+            if command -v apt-get &> /dev/null; then apt-get install -y iproute2 || true; fi
+            if command -v yum &> /dev/null; then yum install -y iproute || true; fi
         fi
     fi
 
