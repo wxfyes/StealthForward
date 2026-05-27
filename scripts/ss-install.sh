@@ -85,12 +85,34 @@ function install_ss() {
         echo -e "${GREEN}已锁定核心: $SB_BIN (模式: $SB_TYPE)${PLAIN}"
     else
         echo -e "${BLUE}未检测到兼容核心，正在为您安装隔离版内核...${PLAIN}"
-        # 尝试使用官方脚本安装
-        if bash <(curl -fsSL https://sing-box.app/install.sh) 2>/dev/null && command -v sing-box &>/dev/null; then
-            SB_BIN=$(command -v sing-box)
-        else
-            # 官方脚本失败时，启用稳健的静态二进制下载兜底（完美支持 Alpine / NAT 小鸡）
-            echo -e "${YELLOW}官方脚本安装失败，正在通过静态二进制压缩包进行兜底安装...${PLAIN}"
+        
+        # 1. 如果是 Alpine 系统，优先尝试直接从 Alpine 社区源安装原生编译版本 (天然支持 musl libc)
+        if command -v apk &> /dev/null; then
+            echo -e "${YELLOW}检测到 Alpine 环境，尝试安装官方原生 musl-compatible 核心...${PLAIN}"
+            # 尝试启用 community 源并安装
+            apk add sing-box --no-cache || true
+            if command -v sing-box &> /dev/null; then
+                SB_BIN=$(command -v sing-box)
+            fi
+        fi
+
+        # 2. 如果包管理器没有装上，再尝试官方一键安装脚本
+        if [ -z "$SB_BIN" ]; then
+            if bash <(curl -fsSL https://sing-box.app/install.sh) 2>/dev/null && command -v sing-box &>/dev/null; then
+                SB_BIN=$(command -v sing-box)
+            fi
+        fi
+
+        # 3. 官方脚本失败时，启用稳健的静态二进制下载兜底（完美支持 Alpine / NAT 小鸡）
+        if [ -z "$SB_BIN" ]; then
+            echo -e "${YELLOW}官方安装途径均不可用，正在通过静态二进制压缩包进行兜底安装...${PLAIN}"
+            
+            # 如果是 Alpine 系统，且我们要运行编译好的 glibc 静态包，必须补齐 gcompat 库支持
+            if command -v apk &> /dev/null; then
+                echo -e "${YELLOW}由于是 Alpine 环境，正在自动补齐 glibc 兼容层 (gcompat) 以支持二进制执行...${PLAIN}"
+                apk add gcompat --no-cache || true
+            fi
+
             ARCH=$(uname -m)
             URL_ARCH="amd64"
             if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
