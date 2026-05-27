@@ -213,6 +213,25 @@ EOF
         START_CMD="$SB_BIN run -c $WRAPPER_CONF"
     fi
 
+    # 7.5. 优化系统 TCP 拥塞控制算法 (自动尝试开启 BBR 网络提速)
+    echo -e "${YELLOW}正在尝试为系统开启 BBR 网络拥塞控制算法以优化丢包提速...${PLAIN}"
+    if [ -f /etc/sysctl.conf ]; then
+        # 清理旧冲突参数并写入新配置 (fq 调度 + BBR 拥塞算法)
+        sed -i '/net.core.default_qdisc/d' /etc/sysctl.conf
+        sed -i '/net.ipv4.tcp_congestion_control/d' /etc/sysctl.conf
+        echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
+        echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
+        # 刷入 sysctl 参数使之生效，静默处理不支持的虚拟化容器环境 (LXC/OpenVZ) 报错
+        sysctl -p >/dev/null 2>&1 || true
+        
+        # 确认 BBR 是否成功生效
+        if sysctl net.ipv4.tcp_congestion_control 2>&1 | grep -q "bbr"; then
+            echo -e "${GREEN}恭喜，底层 BBR 拥塞控制算法已成功开启生效！${PLAIN}"
+        else
+            echo -e "${YELLOW}提示：由于这台小鸡可能运行在 LXC/OpenVZ 共享内核容器环境下，系统限制了修改 TCP 拥塞算法，请在母鸡开启。${PLAIN}"
+        fi
+    fi
+
     # 8. 创建并启动服务
     if command -v systemctl &> /dev/null; then
         cat > /etc/systemd/system/stealth-ss.service <<EOF
