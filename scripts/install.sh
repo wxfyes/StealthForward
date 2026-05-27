@@ -490,8 +490,8 @@ install_ss_exit() {
   if [ -f "$SCRIPT_PATH" ]; then
     bash "$SCRIPT_PATH"
   else
-    # 传递 GH_TOKEN 给子脚本
-    GH_TOKEN=$GH_TOKEN bash <(gh_curl -fsSL "https://raw.githubusercontent.com/$REPO/main/scripts/ss-install.sh")
+    # 传递 GH_TOKEN 给子脚本，附加随机数规避 GitHub Raw CDN 缓存
+    GH_TOKEN=$GH_TOKEN bash <(gh_curl -fsSL "https://raw.githubusercontent.com/$REPO/main/scripts/ss-install.sh?v=$RANDOM")
   fi
 }
 
@@ -501,7 +501,7 @@ uninstall_ss_exit() {
   if [ -f "$SCRIPT_PATH" ]; then
     bash "$SCRIPT_PATH" uninstall
   else
-    GH_TOKEN=$GH_TOKEN bash <(gh_curl -fsSL "https://raw.githubusercontent.com/$REPO/main/scripts/ss-install.sh") uninstall
+    GH_TOKEN=$GH_TOKEN bash <(gh_curl -fsSL "https://raw.githubusercontent.com/$REPO/main/scripts/ss-install.sh?v=$RANDOM") uninstall
   fi
 }
 
