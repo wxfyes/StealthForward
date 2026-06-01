@@ -58,11 +58,15 @@ func syncAllNodes() {
 		var mappings []models.NodeMapping
 		database.DB.Where("entry_node_id = ?", entry.ID).Order("id DESC").Find(&mappings)
 
-		var activeUUIDs []string
+		var activeEmails []string
 		for _, m := range mappings {
 			log.Printf(">>>> [D-Sync] 优先分流同步: V2B节点#%d -> 落地ID#%d", m.V2boardNodeID, m.TargetExitID)
 			uuids := syncSingleTarget(entry, m.V2boardNodeID, m.V2boardType, m.TargetExitID, processedUUIDs)
-			activeUUIDs = append(activeUUIDs, uuids...)
+			for _, uuid := range uuids {
+				if len(uuid) >= 8 {
+					activeEmails = append(activeEmails, fmt.Sprintf("n%d-%s", m.V2boardNodeID, uuid[:8]))
+				}
+			}
 		}
 
 		// 2. 再同步 EntryNode 自身的默认规则 (避开已被映射的用户 AND 已在 Mapping 中定义的节点)
@@ -82,13 +86,17 @@ func syncAllNodes() {
 					nodeType = "v2ray"
 				}
 				uuids := syncSingleTarget(entry, entry.V2boardNodeID, nodeType, entry.TargetExitID, processedUUIDs)
-				activeUUIDs = append(activeUUIDs, uuids...)
+				for _, uuid := range uuids {
+					if len(uuid) >= 8 {
+						activeEmails = append(activeEmails, fmt.Sprintf("n%d-%s", entry.V2boardNodeID, uuid[:8]))
+					}
+				}
 			}
 		}
 
 		// 3. 清理已失效/过期用户
-		if len(activeUUIDs) > 0 {
-			database.DB.Where("entry_node_id = ? AND user_id NOT IN ?", entry.ID, activeUUIDs).Delete(&models.ForwardingRule{})
+		if len(activeEmails) > 0 {
+			database.DB.Where("entry_node_id = ? AND user_email NOT IN ?", entry.ID, activeEmails).Delete(&models.ForwardingRule{})
 		} else {
 			database.DB.Where("entry_node_id = ?", entry.ID).Delete(&models.ForwardingRule{})
 		}
