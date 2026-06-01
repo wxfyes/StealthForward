@@ -3,9 +3,11 @@ package agent
 import (
 	"context"
 	"io"
+	"log"
 	"net"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing/common/buf"
@@ -29,26 +31,26 @@ func (h *HookServer) ModeList() []string {
 }
 
 func (h *HookServer) RoutedConnection(ctx context.Context, conn net.Conn, m adapter.InboundContext, rule adapter.Rule, outbound adapter.Outbound) net.Conn {
+	log.Printf("[Stats-TCP] User: %s, Inbound: %s, Outbound: %s (%s)", m.User, m.Inbound, outbound.Tag(), outbound.Type())
 	if m.User == "" {
 		return conn
 	}
-	// log.Printf("[Debug] Hook TCP for User: %s", m.User)
 
 	val, _ := h.counter.LoadOrStore(m.User, &TrafficStorage{})
 	storage := val.(*TrafficStorage)
 
 	// 使用标准 Conn 包装，不透传 SyscallConn，强制禁用 Splice 以捕获在用户态的流量
 	return &ConnCounter{
-		Conn:    conn,
+		conn:    conn,
 		storage: storage,
 	}
 }
 
 func (h *HookServer) RoutedPacketConnection(ctx context.Context, conn N.PacketConn, m adapter.InboundContext, rule adapter.Rule, outbound adapter.Outbound) N.PacketConn {
+	log.Printf("[Stats-UDP] User: %s, Inbound: %s, Outbound: %s (%s)", m.User, m.Inbound, outbound.Tag(), outbound.Type())
 	if m.User == "" {
 		return conn
 	}
-	// log.Printf("[Debug] Hook UDP for User: %s", m.User)
 
 	val, _ := h.counter.LoadOrStore(m.User, &TrafficStorage{})
 	storage := val.(*TrafficStorage)
@@ -60,33 +62,53 @@ func (h *HookServer) RoutedPacketConnection(ctx context.Context, conn N.PacketCo
 }
 
 // ConnCounter 包装 net.Conn 以统计流量 (TCP)
-// 显式实现 net.Conn 而不是嵌入，以隐藏 ReaderFrom/WriterTo/SyscallConn 接口
-// 这会强制 Go 使用标准的 Read/Write 循环，从而确保流量被统计到
+// 显式实现 net.Conn 且不使用嵌入，以隐藏 ReaderFrom/WriterTo/SyscallConn 接口
+// 并防止任何 Unwrap/反射机制获取到内部的物理 TCP 连接
 type ConnCounter struct {
-	net.Conn
+	conn    net.Conn
 	storage *TrafficStorage
 }
 
 func (c *ConnCounter) Read(b []byte) (n int, err error) {
-	n, err = c.Conn.Read(b)
+	n, err = c.conn.Read(b)
 	if n > 0 {
 		c.storage.UpCounter.Add(int64(n))
-		// log.Printf("TCP Read %d", n)
 	}
 	return
 }
 
 func (c *ConnCounter) Write(b []byte) (n int, err error) {
-	n, err = c.Conn.Write(b)
+	n, err = c.conn.Write(b)
 	if n > 0 {
 		c.storage.DownCounter.Add(int64(n))
-		// log.Printf("TCP Write %d", n)
 	}
 	return
 }
 
-// 即使没有嵌入接口，也要重写 ReaderFrom 以防万一 (虽然不嵌入就不会被类型断言成功)
-// 但为了保险起见，显式拦截是个好习惯
+func (c *ConnCounter) Close() error {
+	return c.conn.Close()
+}
+
+func (c *ConnCounter) LocalAddr() net.Addr {
+	return c.conn.LocalAddr()
+}
+
+func (c *ConnCounter) RemoteAddr() net.Addr {
+	return c.conn.RemoteAddr()
+}
+
+func (c *ConnCounter) SetDeadline(t time.Time) error {
+	return c.conn.SetDeadline(t)
+}
+
+func (c *ConnCounter) SetReadDeadline(t time.Time) error {
+	return c.conn.SetReadDeadline(t)
+}
+
+func (c *ConnCounter) SetWriteDeadline(t time.Time) error {
+	return c.conn.SetWriteDeadline(t)
+}
+
 func (c *ConnCounter) ReadFrom(r io.Reader) (n int64, err error) {
 	// 强制降级到 copy loop
 	return io.Copy(struct{ io.Writer }{c}, r)

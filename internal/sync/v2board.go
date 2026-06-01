@@ -37,10 +37,21 @@ func StartV2boardSync() {
 }
 
 func syncAllNodes() {
+	var defaultSource models.EntryNode
+	err := database.DB.Where("v2board_url <> '' AND v2board_key <> ''").First(&defaultSource).Error
+	if err != nil {
+		log.Println("!!!! [D-Sync] 找不到任何有效的 V2Board 配置，同步取消")
+		return
+	}
+
 	var entries []models.EntryNode
-	database.DB.Where("v2board_url <> '' AND v2board_key <> ''").Find(&entries)
+	database.DB.Find(&entries)
 
 	for _, entry := range entries {
+		if entry.V2boardURL == "" || entry.V2boardKey == "" {
+			entry.V2boardURL = defaultSource.V2boardURL
+			entry.V2boardKey = defaultSource.V2boardKey
+		}
 		processedUUIDs := make(map[string]bool) // 记录已由 Mapping 处理过的用户，防止被默认规则覆盖
 
 		// 1. 先同步 Mapping 规则 (最高优先级，按 ID 降序排列，让新节点/手动节点优先夺取用户)

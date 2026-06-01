@@ -166,11 +166,21 @@ func StartTrafficReporting() {
 }
 
 func pushTrafficAndOnlineToV2Board() {
+	var defaultSource models.EntryNode
+	err := database.DB.Where("v2board_url <> '' AND v2board_key <> ''").First(&defaultSource).Error
+	if err != nil {
+		return
+	}
+
 	var entries []models.EntryNode
-	database.DB.Where("v2board_url <> '' AND v2board_key <> ''").Find(&entries)
+	database.DB.Find(&entries)
 
 	now := time.Now()
 	for _, entry := range entries {
+		if entry.V2boardURL == "" || entry.V2boardKey == "" {
+			entry.V2boardURL = defaultSource.V2boardURL
+			entry.V2boardKey = defaultSource.V2boardKey
+		}
 		// 按 V2Board Node ID 分组的 Payloads
 		nodePayloads := make(map[int]map[string][]int64)
 
@@ -250,6 +260,9 @@ func pushTrafficAndOnlineToV2Board() {
 		}
 		for _, m := range mappings {
 			allTargetNodeIDs[m.V2boardNodeID] = true
+		}
+		for nodeID := range nodePayloads {
+			allTargetNodeIDs[nodeID] = true
 		}
 
 		for nodeID := range allTargetNodeIDs {
