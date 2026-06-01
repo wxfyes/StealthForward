@@ -49,7 +49,7 @@ async function handleSubmit() {
   if (form.value.protocol === 'ss') {
     config.password = form.value.password
     config.cipher = form.value.method
-  } else if (form.value.protocol === 'socks5') {
+  } else if (form.value.protocol === 'socks5' || form.value.protocol === 'http') {
     config.username = form.value.username
     config.password = form.value.password
   } else {
@@ -88,6 +88,7 @@ async function handleSubmit() {
             <select v-model="form.protocol">
               <option value="ss">Shadowsocks (AEAD / 2022)</option>
               <option value="socks5">SOCKS5</option>
+              <option value="http">HTTP Proxy</option>
               <option value="vmess">VMess</option>
               <option value="vless">VLESS</option>
             </select>
@@ -105,11 +106,11 @@ async function handleSubmit() {
         </div>
         
           <label class="flex flex-col gap-1.5 text-[var(--text-muted)]">
-            {{ form.protocol === 'ss' || form.protocol === 'socks5' ? '密码 (Password)' : 'UUID' }}
+            {{ form.protocol === 'ss' || form.protocol === 'socks5' || form.protocol === 'http' ? '密码 (Password)' : 'UUID' }}
             <input v-model="form.password" type="password" placeholder="Secret..." />
           </label>
 
-          <label v-if="form.protocol === 'socks5'" class="flex flex-col gap-1.5 text-[var(--text-muted)]">
+          <label v-if="form.protocol === 'socks5' || form.protocol === 'http'" class="flex flex-col gap-1.5 text-[var(--text-muted)]">
             用户名 (Username)
             <input v-model="form.username" placeholder="Optional..." />
           </label>

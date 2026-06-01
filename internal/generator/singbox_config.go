@@ -387,6 +387,8 @@ func GenerateEntryConfig(entry *models.EntryNode, rules []models.ForwardingRule,
 		if exit.Protocol == "socks5" {
 			exitOutbound["type"] = "socks"
 			exitOutbound["version"] = "5"
+			delete(exitOutbound, "method")
+			delete(exitOutbound, "cipher")
 			// 智能清洗：如果是空密码/空用户，直接移除字段，防止对免密节点造成干扰
 			if u, ok := exitOutbound["username"].(string); ok && u == "" {
 				delete(exitOutbound, "username")
@@ -396,12 +398,94 @@ func GenerateEntryConfig(entry *models.EntryNode, rules []models.ForwardingRule,
 			}
 		}
 
+		if exit.Protocol == "http" {
+			exitOutbound["type"] = "http"
+			delete(exitOutbound, "method")
+			delete(exitOutbound, "cipher")
+			// 智能清洗：如果是空密码/空用户，直接移除字段，防止对免密节点造成干扰
+			if u, ok := exitOutbound["username"].(string); ok && u == "" {
+				delete(exitOutbound, "username")
+			}
+			if p, ok := exitOutbound["password"].(string); ok && p == "" {
+				delete(exitOutbound, "password")
+			}
+
+			finalPort := exitOutbound["server_port"]
+			if exitOutbound["server_port"] == nil || exitOutbound["server_port"] == float64(0) {
+				if exitOutbound["port"] != nil {
+					finalPort = exitOutbound["port"]
+				}
+			}
+			exitOutbound["server_port"] = finalPort
+
+			if addr, ok := exitOutbound["address"].(string); ok && addr != "" {
+				exitOutbound["server"] = addr
+			}
+			delete(exitOutbound, "address")
+			delete(exitOutbound, "port")
+		}
+
+		if exit.Protocol == "vless" {
+			exitOutbound["type"] = "vless"
+			delete(exitOutbound, "method")
+			delete(exitOutbound, "cipher")
+
+			if pwd, ok := exitOutbound["password"].(string); ok {
+				exitOutbound["uuid"] = pwd
+				delete(exitOutbound, "password")
+			}
+
+			finalPort := exitOutbound["server_port"]
+			if exitOutbound["server_port"] == nil || exitOutbound["server_port"] == float64(0) {
+				if exitOutbound["port"] != nil {
+					finalPort = exitOutbound["port"]
+				}
+			}
+			exitOutbound["server_port"] = finalPort
+
+			if addr, ok := exitOutbound["address"].(string); ok && addr != "" {
+				exitOutbound["server"] = addr
+			}
+			delete(exitOutbound, "address")
+			delete(exitOutbound, "port")
+
+			exitOutbound["packet_encoding"] = "xudp"
+		}
+
+		if exit.Protocol == "vmess" {
+			exitOutbound["type"] = "vmess"
+			delete(exitOutbound, "method")
+			delete(exitOutbound, "cipher")
+
+			if pwd, ok := exitOutbound["password"].(string); ok {
+				exitOutbound["uuid"] = pwd
+				delete(exitOutbound, "password")
+			}
+
+			finalPort := exitOutbound["server_port"]
+			if exitOutbound["server_port"] == nil || exitOutbound["server_port"] == float64(0) {
+				if exitOutbound["port"] != nil {
+					finalPort = exitOutbound["port"]
+				}
+			}
+			exitOutbound["server_port"] = finalPort
+
+			if addr, ok := exitOutbound["address"].(string); ok && addr != "" {
+				exitOutbound["server"] = addr
+			}
+			delete(exitOutbound, "address")
+			delete(exitOutbound, "port")
+
+			exitOutbound["packet_encoding"] = "xudp"
+		}
+
 		if exitOutbound["server"] == "127.0.0.1" || exitOutbound["server"] == "localhost" {
 			exitOutbound["type"] = "direct"
 			delete(exitOutbound, "server")
 			delete(exitOutbound, "server_port")
 			delete(exitOutbound, "method")
 			delete(exitOutbound, "password")
+			delete(exitOutbound, "uuid")
 			delete(exitOutbound, "plugin")
 			delete(exitOutbound, "plugin_opts")
 
