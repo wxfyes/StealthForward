@@ -46,12 +46,12 @@ onMounted(() => {
 
 function startPolling() {
   if (refreshTimer.value) clearInterval(refreshTimer.value)
-  // 5秒自动刷新一次数据，让探针变实时
+  // 3秒自动刷新一次数据，让探针和网速在网页端实时跳动
   refreshTimer.value = setInterval(() => {
     if (isAuthenticated.value && activeTab.value === 'dashboard') {
-      fetchData(true) // true 表示静默刷新，不显示加载状态（如果有的话）
+      fetchData(true) // true 表示静默刷新，不显示加载状态
     }
-  }, 5000)
+  }, 3000)
 }
 
 // Fetch all data

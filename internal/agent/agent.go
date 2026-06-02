@@ -322,7 +322,7 @@ func (a *Agent) UpdateInternalCore(configStr string) error {
 }
 
 func (a *Agent) reportTrafficLoop() {
-	ticker := time.NewTicker(20 * time.Second) // 加快频率
+	ticker := time.NewTicker(3 * time.Second) // 加快频率至3秒，实现与哪吒同步的实时刷新
 	// pendingStats: [Email] -> [Up, Down]
 	pendingUserStats := make(map[string][2]int64)
 
