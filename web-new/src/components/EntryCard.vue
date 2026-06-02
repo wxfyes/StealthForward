@@ -302,12 +302,19 @@ async function clearTraffic() {
             <div class="grid-item traffic">
               <span class="dl">TOTAL FLOW</span>
               <div class="dv-wrap">
-                <span class="dv">{{ formatBytes((stats.net_traffic_in || 0) + (stats.net_traffic_out || 0)) }}</span>
+                <div class="traffic-details">
+                  <span class="traffic-up" title="网卡累计上行流量">
+                    <span class="arrow">▲</span> {{ formatBytes(stats.net_traffic_out || 0) }}
+                  </span>
+                  <span class="traffic-down" title="网卡累计下行流量">
+                    <span class="arrow">▼</span> {{ formatBytes(stats.net_traffic_in || 0) }}
+                  </span>
+                </div>
                 <button 
                   @click="clearTraffic" 
                   :disabled="clearingTraffic" 
                   class="clear-btn" 
-                  title="清除流量统计"
+                  title="清除入口业务流量统计"
                 >
                   <svg class="w-2.5 h-2.5" :class="{'animate-spin': clearingTraffic}" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
@@ -688,5 +695,22 @@ async function clearTraffic() {
 @media (max-width: 1024px) {
   .top-row { flex-direction: column; align-items: flex-start; gap: 1rem; }
   .node-brief { flex: 1 1 auto; max-width: 100%; }
+}
+
+.traffic-details {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.72rem;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+  line-height: 1.25;
+}
+
+.traffic-up {
+  color: #f43f5e;
+}
+
+.traffic-down {
+  color: #10b981;
 }
 </style>
