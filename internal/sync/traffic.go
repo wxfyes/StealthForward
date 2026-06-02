@@ -369,7 +369,7 @@ func GetTrafficStatsByEntry() EntryTrafficStats {
 		EntryStats: make(map[uint]models.TrafficStat),
 		ExitStats:  make(map[uint]models.TrafficStat),
 		UserStats:  make(map[string]models.TrafficStat),
-		NodeStats:  make(map[uint]*models.SystemStats),
+		NodeStats:  make(map[uint]map[string]*models.SystemStats),
 	}
 
 	// 获取所有探针数据
