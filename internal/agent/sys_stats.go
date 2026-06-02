@@ -77,6 +77,8 @@ func GetSystemStats() *models.SystemStats {
 				stats.NetOut = int64(float64(currOut-lastNetOut) / duration)
 			}
 		}
+		stats.NetTrafficIn = currIn
+		stats.NetTrafficOut = currOut
 		lastNetIn = currIn
 		lastNetOut = currOut
 		lastCheck = now

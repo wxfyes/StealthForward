@@ -219,6 +219,12 @@ async function clearTraffic() {
           <span class="p-label">API</span>
           <span class="p-val">{{ entry.v2board_url ? 'ON' : 'OFF' }}</span>
         </div>
+        <div class="pill">
+          <span class="p-label">总流量</span>
+          <span class="p-val" :title="'上传: ' + formatBytes(entry.total_upload) + ' / 下载: ' + formatBytes(entry.total_download)">
+            {{ formatBytes(entry.total_upload + entry.total_download) }}
+          </span>
+        </div>
       </div>
 
       <div class="main-btns">
@@ -296,7 +302,7 @@ async function clearTraffic() {
             <div class="grid-item traffic">
               <span class="dl">TOTAL FLOW</span>
               <div class="dv-wrap">
-                <span class="dv">{{ formatBytes(entryTraffic) }}</span>
+                <span class="dv">{{ formatBytes((stats.net_traffic_in || 0) + (stats.net_traffic_out || 0)) }}</span>
                 <button 
                   @click="clearTraffic" 
                   :disabled="clearingTraffic" 
