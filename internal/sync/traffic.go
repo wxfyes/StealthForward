@@ -388,8 +388,8 @@ func GetTrafficStatsByEntry() EntryTrafficStats {
 			if !ok {
 				return true
 			}
-			// 超过 15 秒未上报则判定为下线并清理
-			if nowUnix-stats.ReportAt > 15 {
+			// 超过 60 秒未上报则判定为下线并清理 (兼容 20s 上报的旧版 Agent，防止闪烁)
+			if nowUnix-stats.ReportAt > 60 {
 				subMap.Delete(subKey)
 			} else {
 				activeLB[subKey.(string)] = stats
