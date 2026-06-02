@@ -322,6 +322,11 @@ func ReportTrafficHandler(c *gin.Context) {
 		return
 	}
 
+	// 注入上报的客户端IP
+	if report.Stats != nil {
+		report.Stats.IP = c.ClientIP()
+	}
+
 	// 将流量数据存入同步模块进行汇总
 	sync.CollectTraffic(report)
 

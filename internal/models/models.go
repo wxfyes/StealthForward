@@ -112,6 +112,8 @@ type SystemStats struct {
 	Load15   float64 `json:"load15"`    // 负载 15min
 	Uptime   int64   `json:"uptime"`    // 在线时间 (秒)
 	ReportAt int64   `json:"report_at"` // 上报时间戳
+	Hostname string  `json:"hostname"`  // 主机名
+	IP       string  `json:"ip"`        // 上报IP
 }
 
 // NodeTrafficReport 节点上报的流量汇总

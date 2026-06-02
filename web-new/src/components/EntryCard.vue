@@ -170,9 +170,12 @@ function formatSpeed(bytesPerSec) {
 
 function formatUptime(seconds) {
   if (!seconds) return 'OFF'
-  const h = Math.floor(seconds / 3600)
-  if (h > 24) return `${Math.floor(h/24)}d ${h%24}h`
-  return `${h}h`
+  const d = Math.floor(seconds / 86400)
+  const h = Math.floor((seconds % 86400) / 3600)
+  const m = Math.floor((seconds % 3600) / 60)
+  if (d > 0) return `${d}天 ${h}时`
+  if (h > 0) return `${h}时 ${m}分`
+  return `${m}分`
 }
 
 const clearingTraffic = ref(false)
@@ -240,46 +243,72 @@ async function clearTraffic() {
       </div>
     </div>
 
-    <!-- BottomRow: Realtime Horizontal Stats -->
-    <div class="stats-row" v-if="nodeStats">
-      <div class="stat-item cpu">
-        <span class="sl">CPU</span>
-        <div class="bar-wrap"><div class="bar" :style="{ width: nodeStats.cpu + '%' }"></div></div>
-        <span class="sv">{{ nodeStats.cpu.toFixed(0) }}%</span>
-      </div>
-      <div class="stat-item mem">
-        <span class="sl">MEM</span>
-        <div class="bar-wrap"><div class="bar" :style="{ width: nodeStats.mem + '%' }"></div></div>
-        <span class="sv">{{ nodeStats.mem.toFixed(0) }}%</span>
-      </div>
-      <div class="divider"></div>
-      <div class="data-group">
-        <div class="di">
-          <span class="dl">NET ↓↑</span>
-          <span class="dv">{{ formatSpeed(nodeStats.net_in) }} / {{ formatSpeed(nodeStats.net_out) }}</span>
+    <!-- BottomRow: Realtime Horizontal Stats (Supports Multi Load Balancers) -->
+    <div class="stats-container" v-if="nodeStats && Object.keys(nodeStats).length > 0">
+      <div class="stats-row-wrapper" v-for="(stats, serverName) in nodeStats" :key="serverName">
+        <!-- 负载机名称/IP 标签 (仅当存在多台时展示以保持界面整洁) -->
+        <div class="lb-header" v-if="Object.keys(nodeStats).length > 1">
+          <span class="lb-badge">负载</span>
+          <span class="lb-name">{{ serverName }}</span>
         </div>
-        <div class="di">
-          <span class="dl">LOAD</span>
-          <span class="dv">{{ nodeStats.load1.toFixed(1) }}</span>
-        </div>
-        <div class="di">
-          <span class="dl">UPTIME</span>
-          <span class="dv">{{ formatUptime(nodeStats.uptime) }}</span>
-        </div>
-        <div class="di">
-          <span class="dl">TOTAL</span>
-          <div class="dv-wrap">
-            <span class="dv">{{ formatBytes(entryTraffic) }}</span>
-            <button 
-              @click="clearTraffic" 
-              :disabled="clearingTraffic" 
-              class="clear-btn" 
-              title="清除流量统计"
-            >
-              <svg class="w-2.5 h-2.5" :class="{'animate-spin': clearingTraffic}" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
+        
+        <div class="stats-row">
+          <div class="hardware-bars">
+            <div class="stat-item cpu">
+              <span class="sl">CPU</span>
+              <div class="bar-wrap"><div class="bar" :style="{ width: stats.cpu + '%', background: 'linear-gradient(90deg, #f43f5e, #ec4899)' }"></div></div>
+              <span class="sv">{{ stats.cpu.toFixed(0) }}%</span>
+            </div>
+            <div class="stat-item mem">
+              <span class="sl">MEM</span>
+              <div class="bar-wrap"><div class="bar" :style="{ width: stats.mem + '%', background: 'linear-gradient(90deg, #a855f7, #6366f1)' }"></div></div>
+              <span class="sv">{{ stats.mem.toFixed(0) }}%</span>
+            </div>
+            <div class="stat-item disk">
+              <span class="sl">DISK</span>
+              <div class="bar-wrap"><div class="bar" :style="{ width: (stats.disk || 0) + '%', background: 'linear-gradient(90deg, #06b6d4, #3b82f6)' }"></div></div>
+              <span class="sv">{{ (stats.disk || 0).toFixed(0) }}%</span>
+            </div>
+          </div>
+          
+          <div class="divider"></div>
+          
+          <div class="data-grid">
+            <div class="grid-item net">
+              <span class="dl">NET SPEED</span>
+              <div class="net-speeds">
+                <span class="speed-up" title="上行速率">
+                  <span class="arrow">▲</span> {{ formatSpeed(stats.net_out) }}
+                </span>
+                <span class="speed-down" title="下行速率">
+                  <span class="arrow">▼</span> {{ formatSpeed(stats.net_in) }}
+                </span>
+              </div>
+            </div>
+            <div class="grid-item load">
+              <span class="dl">LOAD (1/5/15)</span>
+              <span class="dv">{{ stats.load1.toFixed(1) }} / {{ stats.load5.toFixed(1) }} / {{ stats.load15.toFixed(1) }}</span>
+            </div>
+            <div class="grid-item uptime">
+              <span class="dl">UPTIME</span>
+              <span class="dv">{{ formatUptime(stats.uptime) }}</span>
+            </div>
+            <div class="grid-item traffic">
+              <span class="dl">TOTAL FLOW</span>
+              <div class="dv-wrap">
+                <span class="dv">{{ formatBytes(entryTraffic) }}</span>
+                <button 
+                  @click="clearTraffic" 
+                  :disabled="clearingTraffic" 
+                  class="clear-btn" 
+                  title="清除流量统计"
+                >
+                  <svg class="w-2.5 h-2.5" :class="{'animate-spin': clearingTraffic}" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -432,42 +461,175 @@ async function clearTraffic() {
 .btn-tool:hover { background: var(--accent); color: #fff; }
 .btn-tool.del:hover { background: #fee2e2; color: #ef4444; }
 
-/* Stats Row - Compact & Horizontal */
-.stats-row {
+/* Stats Row - Nezha & Forwarding Panel Premium Layout */
+.stats-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
   margin-top: 1rem;
   padding-top: 1rem;
   border-top: 1px dashed var(--border-color);
+}
+
+.stats-row-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.stats-row-wrapper:not(:first-child) {
+  padding-top: 1rem;
+  border-top: 1px dashed rgba(200, 200, 200, 0.15);
+}
+
+.stats-row {
+  display: flex;
+  align-items: stretch;
+  gap: 1.5rem;
+}
+
+.lb-header {
   display: flex;
   align-items: center;
-  gap: 1.5rem;
+  gap: 0.5rem;
+}
+
+.lb-badge {
+  font-size: 0.55rem;
+  font-weight: 800;
+  background: var(--accent);
+  color: #fff;
+  padding: 1px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+
+.lb-name {
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: var(--text-primary);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.hardware-bars {
+  flex: 0 0 240px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
 }
 
 .stat-item {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  flex: 0 0 120px;
 }
 
-.stat-item .sl { font-size: 0.65rem; font-weight: 900; color: var(--text-muted); width: 2.5rem; }
-.stat-item .sv { font-size: 0.75rem; font-weight: 800; color: var(--text-primary); font-family: 'JetBrains Mono', monospace; width: 2.5rem; text-align: right; }
+.stat-item .sl {
+  font-size: 0.6rem;
+  font-weight: 800;
+  color: var(--text-muted);
+  width: 2.2rem;
+  text-transform: uppercase;
+}
 
-.bar-wrap { flex: 1; height: 4px; background: var(--bg-secondary); border-radius: 2px; overflow: hidden; }
-.bar { height: 100%; background: var(--accent); border-radius: 2px; transition: width 1s; }
+.stat-item .sv {
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: var(--text-primary);
+  font-family: 'JetBrains Mono', monospace;
+  width: 2.2rem;
+  text-align: right;
+}
 
-.divider { width: 1px; height: 1.5rem; background: var(--border-color); }
-
-.data-group {
+.bar-wrap {
   flex: 1;
-  display: flex;
-  justify-content: space-between;
+  height: 6px;
+  background: rgba(200, 200, 200, 0.1);
+  border-radius: 4px;
+  overflow: hidden;
 }
 
-.di { display: flex; flex-direction: column; }
-.di .dl { font-size: 0.55rem; text-transform: uppercase; font-weight: 800; color: var(--text-muted); letter-spacing: 0.05em; }
-.di .dv { font-size: 0.75rem; font-weight: 800; color: var(--text-primary); font-family: 'JetBrains Mono', monospace; margin-top: 1px; }
+.bar {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+}
 
-.dv-wrap { display: flex; align-items: center; gap: 0.25rem; }
+.divider {
+  width: 1px;
+  background: var(--border-color);
+  align-self: stretch;
+}
+
+.data-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.75rem;
+}
+
+.grid-item {
+  background: rgba(200, 200, 200, 0.03);
+  border: 1px solid rgba(200, 200, 200, 0.05);
+  border-radius: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 50px;
+  transition: all 0.2s;
+}
+
+.grid-item:hover {
+  background: rgba(200, 200, 200, 0.06);
+  border-color: rgba(200, 200, 200, 0.1);
+}
+
+.grid-item .dl {
+  font-size: 0.55rem;
+  text-transform: uppercase;
+  font-weight: 800;
+  color: var(--text-muted);
+  letter-spacing: 0.03em;
+}
+
+.grid-item .dv {
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: var(--text-primary);
+  font-family: 'JetBrains Mono', monospace;
+  margin-top: 2px;
+}
+
+.net-speeds {
+  display: flex;
+  flex-direction: column;
+  margin-top: 2px;
+}
+
+.net-speeds span {
+  font-size: 0.75rem;
+  font-weight: 800;
+  font-family: 'JetBrains Mono', monospace;
+  line-height: 1.2;
+}
+
+.speed-up { color: #f43f5e; }
+.speed-down { color: #10b981; }
+
+.speed-up .arrow, .speed-down .arrow {
+  display: inline-block;
+  font-weight: 900;
+  margin-right: 2px;
+}
+
+.dv-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 2px;
+}
+
 .clear-btn {
   background: transparent;
   border: none;
@@ -499,11 +661,26 @@ async function clearTraffic() {
 .pulse { width: 8px; height: 8px; background: var(--accent); border-radius: 50%; animation: pulse 1.5s infinite; }
 @keyframes pulse { 0% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.5); opacity: 0.5; } 100% { transform: scale(1); opacity: 1; } }
 
+@media (max-width: 1200px) {
+  .stats-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .hardware-bars {
+    flex: 1;
+  }
+  .divider {
+    height: 1px;
+    width: 100%;
+    margin: 0.5rem 0;
+  }
+  .data-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
 @media (max-width: 1024px) {
   .top-row { flex-direction: column; align-items: flex-start; gap: 1rem; }
-  .stats-row { flex-direction: column; align-items: stretch; }
-  .data-group { grid-template-cols: 1fr 1fr; display: grid; gap: 0.75rem; }
   .node-brief { flex: 1 1 auto; max-width: 100%; }
-  .clear-btn { opacity: 0.5; }
 }
 </style>

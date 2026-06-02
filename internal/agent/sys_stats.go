@@ -57,6 +57,12 @@ func GetSystemStats() *models.SystemStats {
 	u, _ := host.Uptime()
 	stats.Uptime = int64(u)
 
+	// Hostname
+	info, _ := host.Info()
+	if info != nil {
+		stats.Hostname = info.Hostname
+	}
+
 	// Network Speed
 	io, _ := net.IOCounters(false)
 	if len(io) > 0 {

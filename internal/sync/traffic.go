@@ -121,9 +121,6 @@ func CollectTraffic(report models.NodeTrafficReport) {
 		targetID := report.NodeID
 		found := false
 
-		// 调试日志：看看原始上报的是什么
-		// log.Printf("[Traffic-Debug] 原始上报 NodeID: %d", report.NodeID)
-
 		// 1. 尝试直接匹配入口 ID
 		var entry models.EntryNode
 		if err := database.DB.First(&entry, targetID).Error; err == nil {
@@ -144,11 +141,9 @@ func CollectTraffic(report models.NodeTrafficReport) {
 		}
 
 		if found {
-			nodeStatsMap.Store(targetID, report.Stats)
-			// 探针正常映射完全静默，不再打印
+			storeLoadBalancerStats(targetID, report.Stats)
 		} else {
-			// 极端情况：完全不认识此 ID，但我们依然存下来，Key 使用上报的原始 ID
-			nodeStatsMap.Store(targetID, report.Stats)
+			storeLoadBalancerStats(targetID, report.Stats)
 			log.Printf("[Traffic-Warning] 收到未知节点的探针数据: ID #%d (请检查 Agent 启动参数)", targetID)
 		}
 	}
@@ -362,10 +357,10 @@ func GetTrafficStats() map[string]models.TrafficStat {
 
 // EntryTrafficStats 入口节点流量统计响应结构
 type EntryTrafficStats struct {
-	EntryStats map[uint]models.TrafficStat   `json:"entry_stats"` // entry_id -> traffic
-	ExitStats  map[uint]models.TrafficStat   `json:"exit_stats"`  // exit_id -> traffic
-	UserStats  map[string]models.TrafficStat `json:"user_stats"`  // user_email -> traffic
-	NodeStats  map[uint]*models.SystemStats  `json:"node_stats"`  // node_id -> system stats
+	EntryStats map[uint]models.TrafficStat             `json:"entry_stats"` // entry_id -> traffic
+	ExitStats  map[uint]models.TrafficStat             `json:"exit_stats"`  // exit_id -> traffic
+	UserStats  map[string]models.TrafficStat           `json:"user_stats"`  // user_email -> traffic
+	NodeStats  map[uint]map[string]*models.SystemStats `json:"node_stats"`  // node_id -> system stats (LB Name/IP -> SystemStats)
 }
 
 // GetTrafficStatsByEntry 返回按入口节点聚合的流量统计
@@ -379,7 +374,32 @@ func GetTrafficStatsByEntry() EntryTrafficStats {
 
 	// 获取所有探针数据
 	nodeStatsMap.Range(func(key, value interface{}) bool {
-		result.NodeStats[key.(uint)] = value.(*models.SystemStats)
+		entryID := key.(uint)
+		subMap, ok := value.(*sync.Map)
+		if !ok {
+			return true
+		}
+
+		activeLB := make(map[string]*models.SystemStats)
+		nowUnix := time.Now().Unix()
+
+		subMap.Range(func(subKey, subVal interface{}) bool {
+			stats, ok := subVal.(*models.SystemStats)
+			if !ok {
+				return true
+			}
+			// 超过 60 秒未上报则判定为下线并清理
+			if nowUnix-stats.ReportAt > 60 {
+				subMap.Delete(subKey)
+			} else {
+				activeLB[subKey.(string)] = stats
+			}
+			return true
+		})
+
+		if len(activeLB) > 0 {
+			result.NodeStats[entryID] = activeLB
+		}
 		return true
 	})
 
@@ -632,4 +652,17 @@ func ClearAllTraffic() error {
 
 	log.Println("[Traffic] Cleared ALL traffic for all nodes")
 	return nil
+}
+
+func storeLoadBalancerStats(targetID uint, stats *models.SystemStats) {
+	val, _ := nodeStatsMap.LoadOrStore(targetID, &sync.Map{})
+	m := val.(*sync.Map)
+	// 使用 Hostname (IP) 作为负载机唯一 Key
+	key := stats.IP
+	if stats.Hostname != "" {
+		key = fmt.Sprintf("%s (%s)", stats.Hostname, stats.IP)
+	} else {
+		key = fmt.Sprintf("LB-%s", stats.IP)
+	}
+	m.Store(key, stats)
 }
