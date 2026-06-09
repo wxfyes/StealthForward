@@ -484,7 +484,6 @@ func lookupIPDirectly(domain string) ([]string, error) {
 
 // TCP 端口探测与主循环
 func probeLoop() {
-	failCount := 0
 	dnsSyncAttempts := 0
 	for {
 		configMutex.RLock()
@@ -540,41 +539,43 @@ func probeLoop() {
 			dnsSyncAttempts = 0 // 同步成功，重置计数器
 		}
 
-		// 2. 进行 TCP 端口连接测试
+		// 2. 进行 TCP 端口连接测试 (一旦失败，立即在 6 秒内连续快速探测 3 次复核，防止网络偶发抖动导致误判，大幅缩短断网响应时间)
 		address := net.JoinHostPort(currentIP, strconv.Itoa(port))
-		conn, err := net.DialTimeout("tcp", address, 5*time.Second)
+		isAlive := false
 
-		if err != nil {
-			// 连接失败，可能被墙或服务器宕机
-			failCount++
+		for checkIdx := 1; checkIdx <= 3; checkIdx++ {
+			conn, err := net.DialTimeout("tcp", address, 5*time.Second)
+			if err == nil {
+				conn.Close()
+				isAlive = true
+				break
+			}
+
+			addLog("error", fmt.Sprintf("TCP 探测失败 (%d/3): 无法连接到 %s (原因: %v)", checkIdx, address, err))
+			if checkIdx < 3 {
+				time.Sleep(2 * time.Second)
+			}
+		}
+
+		if !isAlive {
 			statusState = "blocked"
-			addLog("error", fmt.Sprintf("TCP 探测失败 (%d/3): 无法连接到 %s (原因: %v)", failCount, address, err))
-
-			if failCount >= 3 {
-				addLog("error", "连续 3 次探测失败，判定 IP 已被墙或端口阻断！")
-				if autoChange {
-					if !lastFailedChangeTime.IsZero() && time.Since(lastFailedChangeTime) < 20*time.Minute {
-						addLog("warning", fmt.Sprintf("IP自动更换目前处于 20 分钟冷却期内（已过去 %s），跳过本次更换以防止被限速或锁死。", time.Since(lastFailedChangeTime).Truncate(time.Second)))
-					} else {
-						if triggerChangeIP() {
-							failCount = 0 // 重置计数器
-							lastFailedChangeTime = time.Time{} // 重置冷却时间
-						} else {
-							lastFailedChangeTime = time.Now()
-							addLog("error", "本轮 3 次 IP 更换已全部失败，可能由于服务宕机或端口填错。现已进入 20 分钟安全冷却期，期间不再自动触发更换。")
-						}
-					}
+			addLog("error", "连续 3 次快速探测均失败，判定当前 IP 已被墙或端口阻断！")
+			if autoChange {
+				if !lastFailedChangeTime.IsZero() && time.Since(lastFailedChangeTime) < 20*time.Minute {
+					addLog("warning", fmt.Sprintf("IP自动更换目前处于 20 分钟冷却期内（已过去 %s），跳过本次更换以防止被限速或锁死。", time.Since(lastFailedChangeTime).Truncate(time.Second)))
 				} else {
-					addLog("info", "自动更换 IP 功能已关闭，跳过更换。")
+					if triggerChangeIP() {
+						lastFailedChangeTime = time.Time{} // 重置冷却时间
+					} else {
+						lastFailedChangeTime = time.Now()
+						addLog("error", "本轮 3 次 IP 更换已全部失败，可能由于服务宕机或端口填错。现已进入 20 分钟安全冷却期，期间不再自动触发更换。")
+					}
 				}
+			} else {
+				addLog("info", "自动更换 IP 功能已关闭，跳过更换。")
 			}
 		} else {
 			// 连接成功，网络正常
-			conn.Close()
-			if failCount > 0 {
-				addLog("success", fmt.Sprintf("连接已恢复正常！共重试了 %d 次", failCount))
-			}
-			failCount = 0
 			statusState = "online"
 		}
 		time.Sleep(time.Duration(interval) * time.Second)
