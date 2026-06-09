@@ -183,12 +183,28 @@ func triggerChangeIP() bool {
 
 		addLog("info", fmt.Sprintf("已获取到候选公网 IP: %s，开始进行 TCP 可用性自检...", newIP))
 
-		// 3. 对新 IP 直接发起 TCP 握手自检
+		// 3. 对新 IP 进行连续 TCP 可用性探测 (总计 3 分钟，每 10 秒一次，共 18 次，解决重启延迟问题)
 		address := net.JoinHostPort(newIP, strconv.Itoa(port))
-		conn, err := net.DialTimeout("tcp", address, 5*time.Second)
-		if err == nil {
+		isSuccess := false
+
+		for checkAttempt := 1; checkAttempt <= 18; checkAttempt++ {
+			conn, err := net.DialTimeout("tcp", address, 5*time.Second)
+			if err == nil {
+				conn.Close()
+				isSuccess = true
+				break
+			}
+
+			if checkAttempt == 1 {
+				addLog("warning", fmt.Sprintf("新 IP %s 首次 TCP 自检失败（端口 %d 不通），可能机器或服务正在启动，开始进行最多 3 分钟的连续探测等待...", newIP, port))
+			}
+
+			addLog("info", fmt.Sprintf("正在重新检测新 IP %s 的 TCP 连通性 (%d/18)...", newIP, checkAttempt))
+			time.Sleep(10 * time.Second)
+		}
+
+		if isSuccess {
 			// TCP 握手成功！证明 IP 可用且 VPS 端服务正常
-			conn.Close()
 			addLog("success", fmt.Sprintf("TCP 自检通过！新 IP %s 确认可用，开始同步到 Cloudflare...", newIP))
 
 			configMutex.Lock()
@@ -240,8 +256,8 @@ func triggerChangeIP() bool {
 			return true
 		}
 
-		// TCP 自检失败，说明 IP 可能被墙或 VPS 端服务未运行
-		addLog("warning", fmt.Sprintf("新 IP %s TCP 自检失败（端口 %d 不通），可能该 IP 已被墙，准备重新换 IP...", newIP, port))
+		// 3 分钟连续探测全部失败，说明 IP 确实不可用（被墙）
+		addLog("warning", fmt.Sprintf("新 IP %s 持续 3 分钟 TCP 自检均失败，判定该 IP 不可用（被墙）。", newIP))
 		if attempt == maxTries {
 			addLog("error", "已连续更换 3 次 IP & TCP 自检全部失败！可能是您的 VPS 服务端程序已崩溃，或者端口配置错误，请登录 VPS 检查。")
 			addLog("warning", fmt.Sprintf("将最后获取的 IP %s 强制同步到所有绑定的域名，以便您 SSH 登录排查...", newIP))
@@ -269,9 +285,9 @@ func triggerChangeIP() bool {
 			}
 			return false
 		}
-		// 还没到最大次数，继续循环，等待 5 分钟
-		addLog("info", "等待 5 分钟后进行下一次更换尝试...")
-		time.Sleep(5 * time.Minute)
+		// 判定被墙后，无需等待 5 分钟！仅等 10 秒避开 API 频控立刻开始下一轮更换！
+		addLog("info", "准备发起下一轮 IP 更换，等待 10 秒后继续...")
+		time.Sleep(10 * time.Second)
 	}
 
 	return true
