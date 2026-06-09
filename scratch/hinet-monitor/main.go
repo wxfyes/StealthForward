@@ -537,6 +537,12 @@ func probeLoop() {
 			}
 		} else {
 			dnsSyncAttempts = 0 // 同步成功，重置计数器
+			if expectedIP != "" {
+				configMutex.Lock()
+				lastChangedIP = "" // 匹配成功后，必须清空期望，防止常规轮询重复执行无谓对比和提示
+				configMutex.Unlock()
+				addLog("success", fmt.Sprintf("域名 %s DNS 解析已与最新 IP %s 成功同步！", probeDomain, currentIP))
+			}
 		}
 
 		// 2. 进行 TCP 端口连接测试 (一旦失败，立即在 6 秒内连续快速探测 3 次复核，防止网络偶发抖动导致误判，大幅缩短断网响应时间)
