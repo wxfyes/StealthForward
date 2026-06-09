@@ -82,7 +82,7 @@ func loadConfig() {
 	config = Config{
 		HinetDomain:          "hinet.example.com",
 		HinetPort:            443,
-		ChangeIPURL:          "https://newip.lala.gg/214higl.php",
+		ChangeIPURL:          "https://newip.lala.gg/hinetapi.php?type=change&lanip=10.92.2.14",
 		CheckIntervalSeconds: 60,
 		AutoChangeEnabled:    true,
 		ListenAddr:           ":18080",
