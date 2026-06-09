@@ -607,6 +607,7 @@ func main() {
 	http.HandleFunc("/api/status", handleStatus)
 	http.HandleFunc("/api/toggle", handleToggle)
 	http.HandleFunc("/api/trigger", handleTrigger)
+	http.HandleFunc("/api/check", handleCheck)
 	http.HandleFunc("/api/save", handleSaveConfig)
 
 	addLog("success", fmt.Sprintf("可视化控制台已运行在 http://0.0.0.0%s", config.ListenAddr))
@@ -660,6 +661,49 @@ func handleToggle(w http.ResponseWriter, r *http.Request) {
 // API: 手动触发强制换 IP
 func handleTrigger(w http.ResponseWriter, r *http.Request) {
 	go triggerChangeIP()
+	w.WriteHeader(http.StatusOK)
+}
+
+// API: 手动立即检测连通性
+func handleCheck(w http.ResponseWriter, r *http.Request) {
+	go func() {
+		configMutex.RLock()
+		domainStr := config.HinetDomain
+		port := config.CheckPort
+		if port <= 0 {
+			port = config.HinetPort
+		}
+		configMutex.RUnlock()
+
+		addLog("info", "手动触发连通性检测中...")
+
+		// 1. 获取当前域名的公网 IP
+		domains := parseDomainsList(domainStr)
+		if len(domains) == 0 {
+			addLog("error", "手动探测失败：未配置绑定域名")
+			return
+		}
+		probeDomain := domains[0]
+		ips, err := lookupIPDirectly(probeDomain)
+		if err != nil || len(ips) == 0 {
+			addLog("error", fmt.Sprintf("手动探测：域名 %s 解析失败: %v", probeDomain, err))
+			return
+		}
+		currentIP := ips[0]
+
+		// 2. TCP 探测
+		address := net.JoinHostPort(currentIP, strconv.Itoa(port))
+		conn, err := net.DialTimeout("tcp", address, 5*time.Second)
+		if err != nil {
+			statusState = "blocked"
+			addLog("error", fmt.Sprintf("手动探测失败：无法连接到 %s (原因: %v)", address, err))
+		} else {
+			conn.Close()
+			statusState = "online"
+			addLog("success", fmt.Sprintf("手动探测成功：连接 %s 通畅，当前公网 IP: %s", address, currentIP))
+		}
+		lastCheck = time.Now()
+	}()
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -1190,7 +1234,7 @@ const htmlTemplate = `
         }
 
         async function triggerCheck() {
-            // 简单轮询刷新
+            await fetch('/api/check', { method: 'POST' });
             fetchStatus();
         }
 
