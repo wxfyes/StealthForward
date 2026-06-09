@@ -59,18 +59,25 @@ async function fetchData(silent = false) {
   if (!isAuthenticated.value) return
   
   try {
-    const [e, x, r, m, t] = await Promise.all([
-      apiGet('/api/v1/entries'),
-      apiGet('/api/v1/exits'),
-      apiGet('/api/v1/rules'),
-      apiGet('/api/v1/mappings'),
-      apiGet('/api/v1/traffic')
-    ])
-    entries.value = e || []
-    exits.value = x || []
-    rules.value = r || []
-    mappings.value = m || []
-    trafficStats.value = t || {}
+    if (silent) {
+      // 定时轮询只拉取实时流量与探针状态，不重复拉取静态配置（节点和规则）
+      const t = await apiGet('/api/v1/traffic')
+      trafficStats.value = t || {}
+    } else {
+      // 首次加载或手动刷新全量拉取
+      const [e, x, r, m, t] = await Promise.all([
+        apiGet('/api/v1/entries'),
+        apiGet('/api/v1/exits'),
+        apiGet('/api/v1/rules'),
+        apiGet('/api/v1/mappings'),
+        apiGet('/api/v1/traffic')
+      ])
+      entries.value = e || []
+      exits.value = x || []
+      rules.value = r || []
+      mappings.value = m || []
+      trafficStats.value = t || {}
+    }
   } catch (err) {
     if (err.message?.includes('401')) {
       logout()

@@ -31,7 +31,7 @@ import (
 
 const (
 	// Version 客户端版本号
-	Version = "v3.9.1 (Add connection stats and memory optimization)"
+	Version = "v3.9.2 (Add connection stats, memory optimization and request polling optimization)"
 )
 
 type Config struct {
