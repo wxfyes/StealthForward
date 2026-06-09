@@ -116,6 +116,8 @@ type SystemStats struct {
 	IP            string  `json:"ip"`              // 上报IP
 	NetTrafficIn  int64   `json:"net_traffic_in"`  // 累计下行网卡流量 (bytes)
 	NetTrafficOut int64   `json:"net_traffic_out"` // 累计上行网卡流量 (bytes)
+	TCPConn       uint64  `json:"tcp_conn"`        // TCP 连接数
+	UDPConn       uint64  `json:"udp_conn"`        // UDP 连接数
 }
 
 // NodeTrafficReport 节点上报的流量汇总

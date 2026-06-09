@@ -283,11 +283,25 @@ async function clearTraffic() {
             <div class="grid-item net">
               <span class="dl">NET SPEED</span>
               <div class="net-speeds">
-                <span class="speed-up" title="上行速率">
+                <span class="speed-up has-tooltip">
                   <span class="arrow">▲</span> {{ formatSpeed(stats.net_out) }}
+                  <div class="tooltip-card">
+                    <div class="tooltip-row text-highlight">总上传 {{ formatBytes(stats.net_traffic_out || 0) }}</div>
+                    <div class="tooltip-divider"></div>
+                    <div class="tooltip-title">连接数:</div>
+                    <div class="tooltip-conn">TCP <span class="val">{{ stats.tcp_conn || 0 }}</span></div>
+                    <div class="tooltip-conn">UDP <span class="val">{{ stats.udp_conn || 0 }}</span></div>
+                  </div>
                 </span>
-                <span class="speed-down" title="下行速率">
+                <span class="speed-down has-tooltip">
                   <span class="arrow">▼</span> {{ formatSpeed(stats.net_in) }}
+                  <div class="tooltip-card">
+                    <div class="tooltip-row text-highlight">总下载 {{ formatBytes(stats.net_traffic_in || 0) }}</div>
+                    <div class="tooltip-divider"></div>
+                    <div class="tooltip-title">连接数:</div>
+                    <div class="tooltip-conn">TCP <span class="val">{{ stats.tcp_conn || 0 }}</span></div>
+                    <div class="tooltip-conn">UDP <span class="val">{{ stats.udp_conn || 0 }}</span></div>
+                  </div>
                 </span>
               </div>
             </div>
@@ -627,13 +641,100 @@ async function clearTraffic() {
   line-height: 1.2;
 }
 
-.speed-up { color: #f43f5e; }
-.speed-down { color: #10b981; }
+.speed-up {
+  color: #f43f5e;
+  position: relative;
+  display: inline-block;
+}
+.speed-down {
+  color: #10b981;
+  position: relative;
+  display: inline-block;
+}
 
 .speed-up .arrow, .speed-down .arrow {
   display: inline-block;
   font-weight: 900;
   margin-right: 2px;
+}
+
+/* Premium Tooltip Styles */
+.has-tooltip {
+  cursor: pointer;
+}
+
+.tooltip-card {
+  position: absolute;
+  bottom: 130%;
+  left: 50%;
+  transform: translateX(-50%) translateY(4px);
+  background: rgba(30, 30, 35, 0.95);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #f8f9fa;
+  padding: 0.6rem 0.8rem;
+  border-radius: 8px;
+  font-size: 0.72rem;
+  font-family: 'JetBrains Mono', monospace;
+  white-space: nowrap;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  visibility: hidden;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 99;
+  pointer-events: none;
+}
+
+.tooltip-card::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border-width: 5px;
+  border-style: solid;
+  border-color: rgba(30, 30, 35, 0.95) transparent transparent transparent;
+}
+
+.has-tooltip:hover .tooltip-card {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%) translateY(0);
+}
+
+.tooltip-row {
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+
+.tooltip-row.text-highlight {
+  color: #ffffff;
+}
+
+.tooltip-divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.15);
+  margin: 5px 0;
+}
+
+.tooltip-title {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 0.65rem;
+  font-weight: 700;
+  margin-top: 2px;
+}
+
+.tooltip-conn {
+  display: flex;
+  justify-content: space-between;
+  gap: 1.5rem;
+  color: rgba(255, 255, 255, 0.85);
+  font-weight: 700;
+  margin-top: 2px;
+}
+
+.tooltip-conn .val {
+  color: #10b981;
 }
 
 .dv-wrap {

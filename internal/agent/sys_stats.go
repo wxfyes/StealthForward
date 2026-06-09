@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"bufio"
+	"os"
 	"time"
 
 	"github.com/shirou/gopsutil/v3/cpu"
@@ -17,6 +19,31 @@ var (
 	lastNetOut int64
 	lastCheck  time.Time
 )
+
+func countConnectionsLinux(proto string) uint64 {
+	var count uint64
+	paths := []string{
+		"/proc/net/" + proto,
+		"/proc/net/" + proto + "6",
+	}
+
+	for _, path := range paths {
+		file, err := os.Open(path)
+		if err != nil {
+			continue
+		}
+		scanner := bufio.NewScanner(file)
+		// Skip header line
+		if scanner.Scan() {
+			for scanner.Scan() {
+				count++
+			}
+		}
+		file.Close()
+	}
+
+	return count
+}
 
 func GetSystemStats() *models.SystemStats {
 	stats := &models.SystemStats{}
@@ -83,6 +110,10 @@ func GetSystemStats() *models.SystemStats {
 		lastNetOut = currOut
 		lastCheck = now
 	}
+
+	// Connections (TCP & UDP)
+	stats.TCPConn = countConnectionsLinux("tcp")
+	stats.UDPConn = countConnectionsLinux("udp")
 
 	return stats
 }

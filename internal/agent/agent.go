@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -30,7 +31,7 @@ import (
 
 const (
 	// Version 客户端版本号
-	Version = "v3.6.80 (Fix Login Kickout Bug)"
+	Version = "v3.9.1 (Add connection stats and memory optimization)"
 )
 
 type Config struct {
@@ -73,6 +74,8 @@ func NewAgent(cfg Config) *Agent {
 
 	// 启动定时上报任务
 	go a.reportTrafficLoop()
+	// 启动内存释放定时任务
+	go a.startMemoryReliefLoop()
 	return a
 }
 
@@ -729,4 +732,14 @@ func (a *Agent) isCertExpiredSoon(certPath string, days int) bool {
 	// 剩余时间小于指定天数，或者已经过期
 	threshold := time.Duration(days) * 24 * time.Hour
 	return time.Until(cert.NotAfter) < threshold
+}
+
+// startMemoryReliefLoop 定期执行 GC 并归还空闲内存给操作系统，以解决大并发下内存不自动回收的问题
+func (a *Agent) startMemoryReliefLoop() {
+	// 每 2 分钟释放一次物理内存，以兼顾性能与内存占用
+	ticker := time.NewTicker(2 * time.Minute)
+	for range ticker.C {
+		runtime.GC()
+		debug.FreeOSMemory()
+	}
 }
