@@ -29,6 +29,7 @@ type Config struct {
 	ListenAddr           string `json:"listen_addr"`
 	CFToken              string `json:"cf_token"`
 	CFZoneID             string `json:"cf_zone_id"`
+	CheckPort            int    `json:"check_port"` // 新增：自检探测端口
 }
 
 // LogEntry 日志条目
@@ -86,6 +87,7 @@ func loadConfig() {
 		CheckIntervalSeconds: 60,
 		AutoChangeEnabled:    true,
 		ListenAddr:           ":18080",
+		CheckPort:            80, // 默认使用 80 端口自检
 	}
 
 	data, err := os.ReadFile(configFile)
@@ -115,7 +117,10 @@ func triggerChangeIP() bool {
 	cfToken := config.CFToken
 	cfZoneID := config.CFZoneID
 	domainStr := config.HinetDomain
-	port := config.HinetPort
+	port := config.CheckPort
+	if port <= 0 {
+		port = config.HinetPort
+	}
 	configMutex.RUnlock()
 
 	maxTries := 3
@@ -488,7 +493,10 @@ func probeLoop() {
 	for {
 		configMutex.RLock()
 		domainStr := config.HinetDomain
-		port := config.HinetPort
+		port := config.CheckPort
+		if port <= 0 {
+			port = config.HinetPort
+		}
 		interval := config.CheckIntervalSeconds
 		autoChange := config.AutoChangeEnabled
 		configMutex.RUnlock()
@@ -671,6 +679,7 @@ func handleSaveConfig(w http.ResponseWriter, r *http.Request) {
 	configMutex.Lock()
 	config.HinetDomain = newCfg.HinetDomain
 	config.HinetPort = newCfg.HinetPort
+	config.CheckPort = newCfg.CheckPort
 	config.ChangeIPURL = newCfg.ChangeIPURL
 	config.CheckIntervalSeconds = newCfg.CheckIntervalSeconds
 	config.ListenAddr = newCfg.ListenAddr
@@ -1050,14 +1059,18 @@ const htmlTemplate = `
             <div class="card">
                 <div class="card-title">监控参数设置</div>
                 <form id="config-form" onsubmit="saveConfig(event)">
+                    <div class="form-group">
+                        <label>Hinet 绑定域名 (DDNS，支持英文逗号分隔多个子域名)</label>
+                        <input type="text" class="form-control" name="hinet_domain" value="{{.HinetDomain}}" required>
+                    </div>
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
                         <div class="form-group">
-                            <label>Hinet 绑定域名 (DDNS，支持英文逗号分隔多个子域名)</label>
-                            <input type="text" class="form-control" name="hinet_domain" value="{{.HinetDomain}}" required>
+                            <label>业务代理端口 (中转端口)</label>
+                            <input type="number" class="form-control" name="hinet_port" value="{{.HinetPort}}" required>
                         </div>
                         <div class="form-group">
-                            <label>代理端口 (TCP 探测)</label>
-                            <input type="number" class="form-control" name="hinet_port" value="{{.HinetPort}}" required>
+                            <label>自检探测端口 (TCP，常用如 80 或 22；留空代表与代理端口相同)</label>
+                            <input type="number" class="form-control" name="check_port" value="{{.CheckPort}}">
                         </div>
                     </div>
                     <div class="form-group">
@@ -1194,8 +1207,8 @@ const htmlTemplate = `
             const formData = new FormData(e.target);
             const data = {};
             formData.forEach((value, key) => {
-                if (key === 'hinet_port' || key === 'check_interval_seconds') {
-                    data[key] = parseInt(value, 10);
+                if (key === 'hinet_port' || key === 'check_interval_seconds' || key === 'check_port') {
+                    data[key] = value ? parseInt(value, 10) : 0;
                 } else {
                     data[key] = value;
                 }
