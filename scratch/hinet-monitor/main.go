@@ -30,6 +30,7 @@ type Config struct {
 	CFToken              string `json:"cf_token"`
 	CFZoneID             string `json:"cf_zone_id"`
 	CheckPort            int    `json:"check_port"` // 新增：自检探测端口
+	WaitSecondsAfterChange int    `json:"wait_seconds_after_change"` // 新增：换IP后等待拨号时间（秒）
 }
 
 // LogEntry 日志条目
@@ -89,6 +90,7 @@ func loadConfig() {
 		AutoChangeEnabled:    true,
 		ListenAddr:           ":18080",
 		CheckPort:            80, // 默认使用 80 端口自检
+		WaitSecondsAfterChange: 90, // 默认换IP后等待 90 秒
 	}
 
 	data, err := os.ReadFile(configFile)
@@ -96,6 +98,10 @@ func loadConfig() {
 		json.Unmarshal(data, &config)
 	} else {
 		saveConfigNoLock()
+	}
+
+	if config.WaitSecondsAfterChange <= 0 {
+		config.WaitSecondsAfterChange = 90
 	}
 }
 
@@ -121,6 +127,10 @@ func triggerChangeIP() bool {
 	port := config.CheckPort
 	if port <= 0 {
 		port = config.HinetPort
+	}
+	waitSec := config.WaitSecondsAfterChange
+	if waitSec <= 0 {
+		waitSec = 90
 	}
 	configMutex.RUnlock()
 
@@ -162,8 +172,8 @@ func triggerChangeIP() bool {
 			resp.Body.Close()
 		}
 
-		addLog("warning", "IP 申请指令已发送，等待 90 秒让 Hinet 重新拨号上线...")
-		time.Sleep(90 * time.Second)
+		addLog("warning", fmt.Sprintf("IP 申请指令已发送，等待 %d 秒让 Hinet 重新拨号上线...", waitSec))
+		time.Sleep(time.Duration(waitSec) * time.Second)
 
 		// 2. 只有旧版接口需要从商家页面获取最新的公网 IP
 		if !isNewAPI {
@@ -449,7 +459,7 @@ func updateCloudflareDDNS(token, zoneID, domain, ip string) bool {
 	return updateResp.Success
 }
 
-func lookupIPDirectly(domain string) ([]string, error) {
+func lookupIPDirectlyInternal(domain string) ([]string, error) {
 	// 使用 223.5.5.5 (阿里公共DNS) 或 1.1.1.1 (Cloudflare) 直接解析，绕过本地系统/路由器的缓存
 	resolver := &net.Resolver{
 		PreferGo: true,
@@ -487,6 +497,25 @@ func lookupIPDirectly(domain string) ([]string, error) {
 		res = append(res, ip.IP.String())
 	}
 	return res, nil
+}
+
+func lookupIPDirectly(domain string) ([]string, error) {
+	type result struct {
+		ips []string
+		err error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		ips, err := lookupIPDirectlyInternal(domain)
+		ch <- result{ips, err}
+	}()
+
+	select {
+	case res := <-ch:
+		return res.ips, res.err
+	case <-time.After(5 * time.Second):
+		return nil, fmt.Errorf("DNS lookup timeout after 5 seconds")
+	}
 }
 
 // TCP 端口探测与主循环
@@ -758,6 +787,7 @@ func handleSaveConfig(w http.ResponseWriter, r *http.Request) {
 	config.CheckPort = newCfg.CheckPort
 	config.ChangeIPURL = newCfg.ChangeIPURL
 	config.CheckIntervalSeconds = newCfg.CheckIntervalSeconds
+	config.WaitSecondsAfterChange = newCfg.WaitSecondsAfterChange
 	config.ListenAddr = newCfg.ListenAddr
 	config.CFToken = newCfg.CFToken
 	config.CFZoneID = newCfg.CFZoneID
@@ -1153,10 +1183,14 @@ const htmlTemplate = `
                         <label>商家更换 IP 的 API 链接</label>
                         <input type="text" class="form-control" name="change_ip_url" value="{{.ChangeIPURL}}" required>
                     </div>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px;">
                         <div class="form-group">
                             <label>探测检测间隔 (秒)</label>
                             <input type="number" class="form-control" name="check_interval_seconds" value="{{.CheckIntervalSeconds}}" required>
+                        </div>
+                        <div class="form-group">
+                            <label>换IP后等待上线 (秒)</label>
+                            <input type="number" class="form-control" name="wait_seconds_after_change" value="{{.WaitSecondsAfterChange}}" required>
                         </div>
                         <div class="form-group">
                             <label>Web 控制台监听端口</label>
@@ -1283,7 +1317,7 @@ const htmlTemplate = `
             const formData = new FormData(e.target);
             const data = {};
             formData.forEach((value, key) => {
-                if (key === 'hinet_port' || key === 'check_interval_seconds' || key === 'check_port') {
+                if (key === 'hinet_port' || key === 'check_interval_seconds' || key === 'check_port' || key === 'wait_seconds_after_change') {
                     data[key] = value ? parseInt(value, 10) : 0;
                 } else {
                     data[key] = value;
