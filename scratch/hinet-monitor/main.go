@@ -45,12 +45,13 @@ var (
 	configMutex   sync.RWMutex
 	logs          []LogEntry
 	logsMutex     sync.Mutex
-	statusIP      = "未知"
-	statusState   = "checking" // "online", "blocked", "checking", "error"
+	statusIP      string
+	statusState          string = "online"
 	lastCheck     time.Time
 	configFile    = "config.json"
 	lastChangedIP        string // 新增：最后一次更换成功的新 IP
 	lastFailedChangeTime time.Time // 新增：最后一次更换全部失败的时间
+	activeIP             string // 新增：当前已确认存活最新的公网 IP，防止 DNS 缓存抖动误判
 )
 
 func init() {
@@ -213,6 +214,7 @@ func triggerChangeIP() bool {
 			configMutex.Lock()
 			statusIP = newIP      // 提前更新状态 IP
 			lastChangedIP = newIP // 记录期望的新 IP
+			activeIP = newIP      // 更新当前确保存活的最新的公网 IP
 			configMutex.Unlock()
 
 			// 更新 Cloudflare DDNS
@@ -525,6 +527,12 @@ func probeLoop() {
 		currentIP := ips[0]
 		statusIP = currentIP
 
+		configMutex.Lock()
+		if activeIP == "" {
+			activeIP = currentIP
+		}
+		configMutex.Unlock()
+
 		// 检查 DNS 解析是否已和我们记录的最新 IP 同步
 		configMutex.RLock()
 		expectedIP := lastChangedIP
@@ -553,8 +561,17 @@ func probeLoop() {
 			}
 		}
 
+		detectIP := currentIP
+		configMutex.RLock()
+		actIP := activeIP
+		configMutex.RUnlock()
+		if actIP != "" && currentIP != actIP {
+			addLog("warning", fmt.Sprintf("域名解析结果为 %s，与确认可用 IP %s 不一致，可能处于 DNS 缓存抖动中。将使用 %s 进行本次健康探测以防误判。", currentIP, actIP, actIP))
+			detectIP = actIP
+		}
+
 		// 2. 进行 TCP 端口连接测试 (一旦失败，立即在 6 秒内连续快速探测 3 次复核，防止网络偶发抖动导致误判，大幅缩短断网响应时间)
-		address := net.JoinHostPort(currentIP, strconv.Itoa(port))
+		address := net.JoinHostPort(detectIP, strconv.Itoa(port))
 		isAlive := false
 
 		for checkIdx := 1; checkIdx <= 3; checkIdx++ {
@@ -691,8 +708,23 @@ func handleCheck(w http.ResponseWriter, r *http.Request) {
 		}
 		currentIP := ips[0]
 
+		configMutex.Lock()
+		if activeIP == "" {
+			activeIP = currentIP
+		}
+		configMutex.Unlock()
+
+		detectIP := currentIP
+		configMutex.RLock()
+		actIP := activeIP
+		configMutex.RUnlock()
+		if actIP != "" && currentIP != actIP {
+			addLog("warning", fmt.Sprintf("域名解析结果为 %s，与确认可用 IP %s 不一致，可能处于 DNS 缓存抖动中。将使用 %s 进行本次探测以防误判。", currentIP, actIP, actIP))
+			detectIP = actIP
+		}
+
 		// 2. TCP 探测
-		address := net.JoinHostPort(currentIP, strconv.Itoa(port))
+		address := net.JoinHostPort(detectIP, strconv.Itoa(port))
 		conn, err := net.DialTimeout("tcp", address, 5*time.Second)
 		if err != nil {
 			statusState = "blocked"
