@@ -47,6 +47,11 @@ function handleSaved() {
 
 // 计算该 Mapping 下的总流量
 function getMappingTraffic(m) {
+  if (trafficStats.value && trafficStats.value.mapping_stats) {
+    return trafficStats.value.mapping_stats[m.v2board_node_id] || 0
+  }
+  
+  // 向后兼容旧版本主控
   if (!trafficStats.value || !trafficStats.value.user_stats) return 0
   
   let total = 0

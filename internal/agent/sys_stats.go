@@ -2,7 +2,13 @@ package agent
 
 import (
 	"bufio"
+	"io"
+	"log"
+	stdnet "net"
+	"net/http"
 	"os"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/shirou/gopsutil/v3/cpu"
@@ -18,7 +24,42 @@ var (
 	lastNetIn  int64
 	lastNetOut int64
 	lastCheck  time.Time
+
+	cachedPublicIPv4 string
+	ipOnce           sync.Once
 )
+
+func getPublicIPv4() string {
+	ipOnce.Do(func() {
+		// 异步获取 IP，避免在启动或首次调用时阻塞
+		go func() {
+			client := &http.Client{Timeout: 5 * time.Second}
+			urls := []string{
+				"http://ipv4.icanhazip.com",
+				"https://api.ipify.org",
+				"http://ipinfo.io/ip",
+			}
+			for _, u := range urls {
+				resp, err := client.Get(u)
+				if err == nil {
+					body, err := io.ReadAll(resp.Body)
+					resp.Body.Close()
+					if err == nil {
+						ip := strings.TrimSpace(string(body))
+						if stdnet.ParseIP(ip) != nil && !strings.Contains(ip, ":") {
+							cachedPublicIPv4 = ip
+							log.Printf("[Agent] Detected public IPv4: %s", ip)
+							return
+						}
+					}
+				}
+				time.Sleep(500 * time.Millisecond)
+			}
+			log.Println("[Agent] Warning: failed to detect public IPv4, will fallback to connection IP")
+		}()
+	})
+	return cachedPublicIPv4
+}
 
 func countConnectionsLinux(proto string) uint64 {
 	var count uint64
@@ -89,6 +130,9 @@ func GetSystemStats() *models.SystemStats {
 	if info != nil {
 		stats.Hostname = info.Hostname
 	}
+
+	// IP (Detected Public IPv4)
+	stats.IP = getPublicIPv4()
 
 	// Network Speed
 	io, _ := net.IOCounters(false)

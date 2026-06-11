@@ -357,19 +357,21 @@ func GetTrafficStats() map[string]models.TrafficStat {
 
 // EntryTrafficStats 入口节点流量统计响应结构
 type EntryTrafficStats struct {
-	EntryStats map[uint]models.TrafficStat             `json:"entry_stats"` // entry_id -> traffic
-	ExitStats  map[uint]models.TrafficStat             `json:"exit_stats"`  // exit_id -> traffic
-	UserStats  map[string]models.TrafficStat           `json:"user_stats"`  // user_email -> traffic
-	NodeStats  map[uint]map[string]*models.SystemStats `json:"node_stats"`  // node_id -> system stats (LB Name/IP -> SystemStats)
+	EntryStats   map[uint]models.TrafficStat             `json:"entry_stats"`   // entry_id -> traffic
+	ExitStats    map[uint]models.TrafficStat             `json:"exit_stats"`    // exit_id -> traffic
+	MappingStats map[int]int64                           `json:"mapping_stats"` // v2board_node_id -> total_traffic (upload + download)
+	UserStats    map[string]models.TrafficStat           `json:"user_stats"`    // user_email -> traffic (为了向前兼容保持该字段，但为空以省流量)
+	NodeStats    map[uint]map[string]*models.SystemStats `json:"node_stats"`    // node_id -> system stats (LB Name/IP -> SystemStats)
 }
 
 // GetTrafficStatsByEntry 返回按入口节点聚合的流量统计
 func GetTrafficStatsByEntry() EntryTrafficStats {
 	result := EntryTrafficStats{
-		EntryStats: make(map[uint]models.TrafficStat),
-		ExitStats:  make(map[uint]models.TrafficStat),
-		UserStats:  make(map[string]models.TrafficStat),
-		NodeStats:  make(map[uint]map[string]*models.SystemStats),
+		EntryStats:   make(map[uint]models.TrafficStat),
+		ExitStats:    make(map[uint]models.TrafficStat),
+		MappingStats: make(map[int]int64),
+		UserStats:    make(map[string]models.TrafficStat), // 返回空 Map，极致省流量与 CPU
+		NodeStats:    make(map[uint]map[string]*models.SystemStats),
 	}
 
 	// 获取所有探针数据
@@ -405,9 +407,42 @@ func GetTrafficStatsByEntry() EntryTrafficStats {
 
 	// 获取所有用户流量 (内存中的实时数据)
 	userStats := GetTrafficStats()
-	result.UserStats = userStats
 
-	// 从数据库读取持久化的入口节点流量
+	// 1. 聚合分流映射流量，直接由后端累加后返回给前端，替代传输 1.8 万个用户明细
+	for email, stat := range userStats {
+		if strings.HasPrefix(email, "n") && strings.Contains(email, "-") {
+			parts := strings.Split(email, "-")
+			nodeIDStr := parts[0][1:] // 去掉 'n'
+			if nodeID, err := strconv.Atoi(nodeIDStr); err == nil {
+				result.MappingStats[nodeID] += stat.Upload + stat.Download
+			}
+		}
+	}
+
+	// 2. 一次性查询所有规则，避免在入口和落地节点循环中反复进行 SQL N+1 查询导致卡顿
+	entryMemTraffic := make(map[uint]*[2]int64)
+	exitMemTraffic := make(map[uint]*[2]int64)
+
+	var allRules []models.ForwardingRule
+	database.DB.Find(&allRules)
+
+	for _, rule := range allRules {
+		if stat, ok := userStats[rule.UserEmail]; ok {
+			if _, exists := entryMemTraffic[rule.EntryNodeID]; !exists {
+				entryMemTraffic[rule.EntryNodeID] = &[2]int64{0, 0}
+			}
+			entryMemTraffic[rule.EntryNodeID][0] += stat.Upload
+			entryMemTraffic[rule.EntryNodeID][1] += stat.Download
+
+			if _, exists := exitMemTraffic[rule.ExitNodeID]; !exists {
+				exitMemTraffic[rule.ExitNodeID] = &[2]int64{0, 0}
+			}
+			exitMemTraffic[rule.ExitNodeID][0] += stat.Upload
+			exitMemTraffic[rule.ExitNodeID][1] += stat.Download
+		}
+	}
+
+	// 从数据库读取持久化的入口节点流量并加上内存中的增量
 	var entries []models.EntryNode
 	database.DB.Find(&entries)
 	for _, entry := range entries {
@@ -416,16 +451,9 @@ func GetTrafficStatsByEntry() EntryTrafficStats {
 
 		// 计算内存中的当前值
 		var memUp, memDown int64
-		// 获取该节点下所有用户的实时流量总和
-		// 优化：这里遍历所有规则可能较慢，但对于一般规模(几千用户)是可以接受的
-		// 如果规模很大，应该在 collect 时维护 node 维度的缓存
-		var rules []models.ForwardingRule
-		database.DB.Where("entry_node_id = ?", entry.ID).Find(&rules)
-		for _, rule := range rules {
-			if stat, ok := userStats[rule.UserEmail]; ok {
-				memUp += stat.Upload
-				memDown += stat.Download
-			}
+		if t, ok := entryMemTraffic[entry.ID]; ok {
+			memUp = t[0]
+			memDown = t[1]
 		}
 
 		// 获取上次同步时的值 (Offset)
@@ -457,7 +485,7 @@ func GetTrafficStatsByEntry() EntryTrafficStats {
 		}
 	}
 
-	// 从数据库读取持久化的落地节点流量
+	// 从数据库读取持久化的落地节点流量并加上内存中的增量
 	var exits []models.ExitNode
 	database.DB.Find(&exits)
 	for _, exit := range exits {
@@ -465,13 +493,9 @@ func GetTrafficStatsByEntry() EntryTrafficStats {
 		dbDown := exit.TotalDownload
 
 		var memUp, memDown int64
-		var rules []models.ForwardingRule
-		database.DB.Where("exit_node_id = ?", exit.ID).Find(&rules)
-		for _, rule := range rules {
-			if stat, ok := userStats[rule.UserEmail]; ok {
-				memUp += stat.Upload
-				memDown += stat.Download
-			}
+		if t, ok := exitMemTraffic[exit.ID]; ok {
+			memUp = t[0]
+			memDown = t[1]
 		}
 
 		syncedExitLock.RLock()

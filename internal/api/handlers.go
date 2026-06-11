@@ -322,8 +322,8 @@ func ReportTrafficHandler(c *gin.Context) {
 		return
 	}
 
-	// 注入上报的客户端IP
-	if report.Stats != nil {
+	// 注入上报的客户端IP (若 Agent 没能获取到自己的 IPv4 公网 IP，则使用连接 IP 兜底)
+	if report.Stats != nil && report.Stats.IP == "" {
 		report.Stats.IP = c.ClientIP()
 	}
 

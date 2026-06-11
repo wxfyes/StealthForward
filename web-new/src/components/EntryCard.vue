@@ -134,11 +134,10 @@ async function reprovisionNode() {
 }
 
 function copyUpdateCommand() {
-  const version = import.meta.env.VITE_APP_VERSION || 'Dev'
-  const cmd = `curl -fsSL https://raw.githubusercontent.com/wangn9900/StealthForward/main/scripts/install.sh | bash -s -- --update-agent ${version}`
+  const cmd = `curl -fsSL https://raw.githubusercontent.com/wangn9900/StealthForward/main/scripts/install.sh | bash -s -- --update-agent`
   
   navigator.clipboard.writeText(cmd).then(() => {
-    alert('Agent 更新命令已复制！(版本: ' + version + ')')
+    alert('Agent 更新命令已复制！(将自动更新至最新 Release 版本)')
   })
 }
 
@@ -252,8 +251,8 @@ async function clearTraffic() {
     <!-- BottomRow: Realtime Horizontal Stats (Supports Multi Load Balancers) -->
     <div class="stats-container" v-if="nodeStats && Object.keys(nodeStats).length > 0">
       <div class="stats-row-wrapper" v-for="(stats, serverName) in nodeStats" :key="serverName">
-        <!-- 负载机名称/IP 标签 (仅当存在多台时展示以保持界面整洁) -->
-        <div class="lb-header" v-if="Object.keys(nodeStats).length > 1">
+        <!-- 负载机名称/IP 标签 -->
+        <div class="lb-header">
           <span class="lb-badge">负载</span>
           <span class="lb-name">{{ serverName }}</span>
         </div>

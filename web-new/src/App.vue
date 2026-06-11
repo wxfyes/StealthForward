@@ -65,18 +65,20 @@ async function fetchData(silent = false) {
       trafficStats.value = t || {}
     } else {
       // 首次加载或手动刷新全量拉取
-      const [e, x, r, m, t] = await Promise.all([
+      const [e, x, r, m, t, s] = await Promise.all([
         apiGet('/api/v1/entries'),
         apiGet('/api/v1/exits'),
         apiGet('/api/v1/rules'),
         apiGet('/api/v1/mappings'),
-        apiGet('/api/v1/traffic')
+        apiGet('/api/v1/traffic'),
+        apiGet('/api/v1/system/config')
       ])
       entries.value = e || []
       exits.value = x || []
       rules.value = r || []
       mappings.value = m || []
       trafficStats.value = t || {}
+      if (s && s.config) settings.value = s.config
     }
   } catch (err) {
     if (err.message?.includes('401')) {
