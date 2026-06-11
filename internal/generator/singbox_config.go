@@ -23,6 +23,14 @@ type SingBoxConfig struct {
 }
 
 func GenerateEntryConfig(entry *models.EntryNode, rules []models.ForwardingRule, exits []models.ExitNode) (string, error) {
+	// 强制对规则和落地节点进行排序，保证生成的 JSON 文本顺序 100% 一致，避免因乱序导致 MD5 哈希变化，从而节省流量
+	sort.Slice(rules, func(i, j int) bool {
+		return rules[i].ID < rules[j].ID
+	})
+	sort.Slice(exits, func(i, j int) bool {
+		return exits[i].ID < exits[j].ID
+	})
+
 	config := SingBoxConfig{
 		Log: map[string]interface{}{
 			"level": "error",
