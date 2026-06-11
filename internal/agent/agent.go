@@ -3,7 +3,9 @@ package agent
 import (
 	"bytes"
 	"context"
+	"crypto/md5"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
@@ -31,7 +33,7 @@ import (
 
 const (
 	// Version 客户端版本号
-	Version = "v3.9.3 (Traffic poll optimization and public IPv4 detection fixes)"
+	Version = "v3.9.3"
 )
 
 type Config struct {
@@ -399,10 +401,15 @@ func (a *Agent) reportTrafficLoop() {
 }
 
 func (a *Agent) RunOnce() {
-	log.Println("Syncing state from controller...")
-
 	// 1. 获取来自控制端的最新数据 (JSON 格式)
-	url := fmt.Sprintf("%s/api/v1/node/%d/config", a.cfg.ControllerAddr, a.cfg.NodeID)
+	localHash := ""
+	if a.lastConfig != "" {
+		hasher := md5.New()
+		hasher.Write([]byte(a.lastConfig))
+		localHash = hex.EncodeToString(hasher.Sum(nil))
+	}
+
+	url := fmt.Sprintf("%s/api/v1/node/%d/config?hash=%s", a.cfg.ControllerAddr, a.cfg.NodeID, localHash)
 	req, _ := http.NewRequest("GET", url, nil)
 	if a.cfg.AdminToken != "" {
 		req.Header.Set("Authorization", a.cfg.AdminToken)
@@ -425,14 +432,22 @@ func (a *Agent) RunOnce() {
 	}
 
 	var result struct {
-		Config   string `json:"config"`
-		CertTask bool   `json:"cert_task"`
-		Domain   string `json:"domain"`
-		CfToken  string `json:"cf_token"`
+		Config      string `json:"config"`
+		HashMatched bool   `json:"hash_matched"`
+		CertTask    bool   `json:"cert_task"`
+		Domain      string `json:"domain"`
+		CfToken     string `json:"cf_token"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		log.Printf("Failed to decode sync response: %v", err)
 		return
+	}
+
+	if result.HashMatched {
+		// 配置未发生改变，只打印 debug 日志
+		// log.Println("Config not changed (hash matched), skipping apply.")
+	} else {
+		log.Println("Syncing state from controller (new config detected)...")
 	}
 
 	// 2. 检查是否有证书申请任务，或者本地证书已失效 (主动防御)

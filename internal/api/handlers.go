@@ -1,6 +1,8 @@
 package api
 
 import (
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -44,6 +46,15 @@ func GetConfigHandler(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate config"})
 		return
 	}
+
+	// 计算配置 MD5 Hash
+	hasher := md5.New()
+	hasher.Write([]byte(config))
+	configHash := hex.EncodeToString(hasher.Sum(nil))
+
+	// 检查客户端请求的 Hash
+	clientHash := c.Query("hash")
+
 	// 4. 获取 CF_API_TOKEN (用于下发给 Agent 实现最稳定的 DNS-01 验证)
 	var cfToken string
 	var setting models.SystemSetting
@@ -51,12 +62,25 @@ func GetConfigHandler(c *gin.Context) {
 		cfToken = setting.Value
 	}
 
+	if clientHash != "" && clientHash == configHash {
+		// Hash 一致，配置未变，返回空配置以省流量
+		c.JSON(http.StatusOK, gin.H{
+			"config":       "",
+			"hash_matched": true,
+			"cert_task":    entry.CertTask,
+			"domain":       entry.Domain,
+			"cf_token":     cfToken,
+		})
+		return
+	}
+
 	// 5. 返回 JSON 响应，包含配置和可能的任务
 	c.JSON(http.StatusOK, gin.H{
-		"config":    config,
-		"cert_task": entry.CertTask,
-		"domain":    entry.Domain,
-		"cf_token":  cfToken,
+		"config":       config,
+		"hash_matched": false,
+		"cert_task":    entry.CertTask,
+		"domain":       entry.Domain,
+		"cf_token":     cfToken,
 	})
 }
 
