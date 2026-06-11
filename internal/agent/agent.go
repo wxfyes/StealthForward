@@ -118,6 +118,7 @@ func (a *Agent) FetchConfig() (string, error) {
 
 // ApplyConfig 将配置保存到本地并尝试重启 Sing-box
 func (a *Agent) ApplyConfig(configStr string) error {
+	originalConfigStr := configStr
 	// HOTFIX: 强制修复 AnyTLS 配置问题 (Padding + ALPN)
 	var rawCfg map[string]interface{}
 	if err := json.Unmarshal([]byte(configStr), &rawCfg); err == nil {
@@ -241,7 +242,7 @@ func (a *Agent) ApplyConfig(configStr string) error {
 		return err
 	}
 
-	a.lastConfig = configStr
+	a.lastConfig = originalConfigStr
 	log.Printf("New config applied to %s", configPath)
 
 	// 3. 确保内核二进制文件存在，否则自动下载
