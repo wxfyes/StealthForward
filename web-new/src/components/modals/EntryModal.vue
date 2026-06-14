@@ -38,6 +38,7 @@ const form = ref({
   v2board_key: '',
   v2board_node_id: null,
   v2board_type: 'v2ray',
+  security: 'xtls-rprx-vision',
   // Reality (VLESS)
   reality_enabled: false,
   reality_server_name: '',
@@ -226,10 +227,19 @@ async function handleSubmit() {
         
         <!-- VLESS Security Selection -->
         <label v-if="form.protocol === 'vless'" class="md:col-span-2 flex flex-col gap-1.5 text-[var(--text-muted)] border-t border-white/5 pt-2 mt-2">
-          安全性 (Security)
+          伪装模式 (TLS / Reality)
           <select v-model="form.reality_enabled">
-            <option :value="false">TLS + Vision (标准)</option>
-            <option :value="true">Reality (无域名)</option>
+            <option :value="false">标准 TLS (自备证书与域名)</option>
+            <option :value="true">Reality (借壳免证书域名)</option>
+          </select>
+        </label>
+
+        <!-- VLESS Flow Selection -->
+        <label v-if="form.protocol === 'vless' && (form.transport === 'tcp' || !form.transport)" class="md:col-span-2 flex flex-col gap-1.5 text-[var(--text-muted)]">
+          流控选项 (Flow)
+          <select v-model="form.security">
+            <option value="xtls-rprx-vision">XTLS-Vision (开启流控混淆)</option>
+            <option value="none">none (无流控，跑纯净模式)</option>
           </select>
         </label>
 
