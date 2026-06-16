@@ -173,7 +173,8 @@ func (fm *ForwardManager) startInstance(rule models.PortForward) (*PortForwardIn
   "endpoints": [
     {
       "listen": "0.0.0.0:%d",
-      "remote": "%s"
+      "remote": "%s",
+      "use_udp": true
     }
   ]
 }`, rule.ListenPort, rule.TargetAddr)
