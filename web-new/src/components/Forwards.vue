@@ -288,15 +288,15 @@ async function runDiagnose(rule) {
               <td colspan="8" class="p-8 text-center text-[var(--text-muted)] font-light text-sm">暂无匹配的端口转发规则</td>
             </tr>
             <tr v-for="rule in filteredRules" :key="rule.id" class="hover:bg-white/5 transition text-sm">
-              <td class="p-4 pl-6 font-medium text-white">{{ rule.name }}</td>
-              <td class="p-4 text-gray-300">{{ getEntryNodeName(rule.entry_node_id) }}</td>
+              <td class="p-4 pl-6 font-medium text-gray-800 dark:text-white">{{ rule.name }}</td>
+              <td class="p-4 text-gray-600 dark:text-gray-300">{{ getEntryNodeName(rule.entry_node_id) }}</td>
               <td class="p-4 font-mono font-bold text-primary-400">{{ rule.listen_port }}</td>
               <td class="p-4 uppercase text-xs font-bold">
                 <span :class="rule.type === 'realm' ? 'text-indigo-400' : 'text-sky-400'">
                   {{ rule.type }}
                 </span>
               </td>
-              <td class="p-4 font-mono text-xs text-gray-400 max-w-[200px] truncate" :title="rule.target_addr">{{ rule.target_addr }}</td>
+              <td class="p-4 font-mono text-xs text-gray-500 dark:text-gray-400 max-w-[200px] truncate" :title="rule.target_addr">{{ rule.target_addr }}</td>
               <td class="p-4 text-right font-mono text-xs">
                 <div class="text-emerald-400">↑ {{ formatBytes(rule.upload) }}</div>
                 <div class="text-indigo-400">↓ {{ formatBytes(rule.download) }}</div>
@@ -326,7 +326,7 @@ async function runDiagnose(rule) {
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                     </svg>
                   </button>
-                  <button @click="openEditModal(rule)" class="p-1.5 rounded-xl hover:bg-white/10 text-white transition" title="编辑">
+                  <button @click="openEditModal(rule)" class="p-1.5 rounded-xl hover:bg-black/10 dark:hover:bg-white/10 text-gray-600 dark:text-white transition" title="编辑">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
                     </svg>
