@@ -94,7 +94,27 @@ async function handleSubmit(isEdit = false) {
       url = `/api/v1/portforwards/${form.value.id}`
     }
 
-    const res = await apiPost(url, payload)
+    let res
+    if (isEdit) {
+      const token = localStorage.getItem('stealth_token')
+      const response = await fetch(url, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': token
+        },
+        body: JSON.stringify(payload)
+      })
+      if (response.ok) {
+        res = await response.json()
+      } else {
+        const errData = await response.json().catch(() => ({}))
+        res = { error: errData.error || `HTTP 错误: ${response.status}` }
+      }
+    } else {
+      res = await apiPost(url, payload)
+    }
+
     if (res && !res.error) {
       showAddModal.value = false
       showEditModal.value = false
@@ -275,7 +295,7 @@ async function runDiagnose(rule) {
             <tr class="border-b border-white/5 text-[var(--text-muted)] text-sm font-medium">
               <th class="p-4 pl-6">规则名称</th>
               <th class="p-4">入口节点</th>
-              <th class="p-4">监听端口</th>
+              <th class="p-4">中转入口地址</th>
               <th class="p-4">转发模式</th>
               <th class="p-4">目标落地</th>
               <th class="p-4 text-right">上行/下行</th>
@@ -290,7 +310,16 @@ async function runDiagnose(rule) {
             <tr v-for="rule in filteredRules" :key="rule.id" class="hover:bg-white/5 transition text-sm">
               <td class="p-4 pl-6 font-medium text-gray-800 dark:text-white">{{ rule.name }}</td>
               <td class="p-4 text-gray-600 dark:text-gray-300">{{ getEntryNodeName(rule.entry_node_id) }}</td>
-              <td class="p-4 font-mono font-bold text-primary-400">{{ rule.listen_port }}</td>
+              <td class="p-4 font-mono font-bold text-primary-400">
+                <div class="flex items-center gap-1.5">
+                  <span class="truncate max-w-[220px]" :title="getEntryConnectAddr(rule)">{{ getEntryConnectAddr(rule) }}</span>
+                  <button @click="copyText(getEntryConnectAddr(rule))" class="p-1 rounded hover:bg-black/10 dark:hover:bg-white/10 text-gray-400 hover:text-gray-600 dark:hover:text-white transition" title="复制中转连接地址">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                    </svg>
+                  </button>
+                </div>
+              </td>
               <td class="p-4 uppercase text-xs font-bold">
                 <span :class="rule.type === 'realm' ? 'text-indigo-400' : 'text-sky-400'">
                   {{ rule.type }}

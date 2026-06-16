@@ -34,9 +34,9 @@ type ForwardManager struct {
 }
 
 var (
-	// iptables 流量匹配正则 (匹配 -m comment --comment "stealth_pf_in_12" 这类规则)
-	pfInRegex  = regexp.MustCompile(`\s*(\d+)\s+\d+\s+.*\s+dpt:(\d+)\s+/\*\s+stealth_pf_in_(\d+)\s+\*/`)
-	pfOutRegex = regexp.MustCompile(`\s*(\d+)\s+\d+\s+.*\s+spt:(\d+)\s+/\*\s+stealth_pf_out_(\d+)\s+\*/`)
+	// iptables 流量匹配正则 (修改匹配组捕获第二个数字即字节数，而不是包数)
+	pfInRegex  = regexp.MustCompile(`\s*\d+\s+(\d+)\s+.*\s+dpt:(\d+)\s+/\*\s+stealth_pf_in_(\d+)\s+\*/`)
+	pfOutRegex = regexp.MustCompile(`\s*\d+\s+(\d+)\s+.*\s+spt:(\d+)\s+/\*\s+stealth_pf_out_(\d+)\s+\*/`)
 )
 
 func NewForwardManager(nodeID int, localDir string) *ForwardManager {
@@ -320,7 +320,7 @@ func (fm *ForwardManager) readIptablesTraffic() {
 			ruleID, _ := strconv.ParseUint(matches[3], 10, 32)
 			
 			stat := fm.traffic[uint(ruleID)]
-			stat.Download = bytesVal // INPUT 对应的是用户的下载量
+			stat.Upload = bytesVal // INPUT 对应的是用户的上传量 (发往中继端口的流量)
 			fm.traffic[uint(ruleID)] = stat
 		}
 	}
@@ -333,7 +333,7 @@ func (fm *ForwardManager) readIptablesTraffic() {
 			ruleID, _ := strconv.ParseUint(matches[3], 10, 32)
 
 			stat := fm.traffic[uint(ruleID)]
-			stat.Upload = bytesVal // OUTPUT 对应的是用户的上传量
+			stat.Download = bytesVal // OUTPUT 对应的是用户的下载量 (从中继端口发给用户的流量)
 			fm.traffic[uint(ruleID)] = stat
 		}
 	}

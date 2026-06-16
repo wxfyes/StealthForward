@@ -280,6 +280,7 @@ func main() {
 		v1.GET("/portforwards", api.ListPortForwardsHandler)
 		v1.POST("/portforwards", api.CreatePortForwardHandler)
 		v1.PUT("/portforwards/:id", api.UpdatePortForwardHandler)
+		v1.POST("/portforwards/:id", api.UpdatePortForwardHandler)
 		v1.DELETE("/portforwards/:id", api.DeletePortForwardHandler)
 		v1.POST("/portforwards/clear/:id", api.ClearPortForwardTrafficHandler)
 		v1.POST("/portforwards/toggle/:id", api.TogglePortForwardHandler)
