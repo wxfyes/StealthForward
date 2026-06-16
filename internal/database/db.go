@@ -29,6 +29,7 @@ func InitDB() {
 		&models.SystemSetting{},
 		&models.CloudAccount{},
 		&models.SSHKey{},
+		&models.PortForward{},
 	)
 	if err != nil {
 		log.Fatalf("failed to migrate database: %v", err)

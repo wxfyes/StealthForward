@@ -62,6 +62,10 @@ func GetConfigHandler(c *gin.Context) {
 		cfToken = setting.Value
 	}
 
+	// 获取该入口下的所有免审计转发规则
+	var portForwards []models.PortForward
+	database.DB.Where("entry_node_id = ?", nodeID).Find(&portForwards)
+
 	if clientHash != "" && clientHash == configHash {
 		// Hash 一致，配置未变，返回空配置以省流量
 		c.JSON(http.StatusOK, gin.H{
@@ -70,6 +74,7 @@ func GetConfigHandler(c *gin.Context) {
 			"cert_task":    entry.CertTask,
 			"domain":       entry.Domain,
 			"cf_token":     cfToken,
+			"portforwards": portForwards,
 		})
 		return
 	}
@@ -81,6 +86,7 @@ func GetConfigHandler(c *gin.Context) {
 		"cert_task":    entry.CertTask,
 		"domain":       entry.Domain,
 		"cf_token":     cfToken,
+		"portforwards": portForwards,
 	})
 }
 
@@ -353,6 +359,19 @@ func ReportTrafficHandler(c *gin.Context) {
 
 	// 将流量数据存入同步模块进行汇总
 	sync.CollectTraffic(report)
+
+	// 独立处理免审计端口转发流量累计（增量累加）
+	if len(report.PortForwards) > 0 {
+		for ruleID, traffic := range report.PortForwards {
+			if traffic.Upload > 0 || traffic.Download > 0 {
+				// 增量更新数据库
+				database.DB.Model(&models.PortForward{}).Where("id = ?", ruleID).Updates(map[string]interface{}{
+					"upload":   gorm.Expr("upload + ?", traffic.Upload),
+					"download": gorm.Expr("download + ?", traffic.Download),
+				})
+			}
+		}
+	}
 
 	c.JSON(http.StatusOK, gin.H{"status": "success"})
 }

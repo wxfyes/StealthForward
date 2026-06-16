@@ -33,7 +33,7 @@ import (
 
 const (
 	// Version 客户端版本号
-	Version = "v3.9.5"
+	Version = "v3.9.6"
 )
 
 type Config struct {
@@ -54,6 +54,7 @@ type Agent struct {
 	client          *http.Client
 	externalTraffic map[uint][2]int64
 	trafficMu       sync.Mutex
+	fm              *ForwardManager
 }
 
 func NewAgent(cfg Config) *Agent {
@@ -69,6 +70,7 @@ func NewAgent(cfg Config) *Agent {
 		cfg:             cfg,
 		client:          &http.Client{Timeout: 10 * time.Second},
 		externalTraffic: make(map[uint][2]int64),
+		fm:              NewForwardManager(cfg.NodeID, cfg.LocalConfigDir),
 	}
 	// 启动时确保伪装页存在
 	a.EnsureMasquerade()
@@ -369,12 +371,19 @@ func (a *Agent) reportTrafficLoop() {
 		// 	continue
 		// }
 
+		// 获取免审计端口转发的流量增量数据
+		var pfTraffic map[uint]models.TrafficStat
+		if a.fm != nil {
+			pfTraffic = a.fm.GetIncrementTraffic()
+		}
+
 		report := models.NodeTrafficReport{
 			NodeID:        uint(a.cfg.NodeID),
 			Traffic:       userTraffic,
 			TotalUpload:   nodeUp,
 			TotalDownload: nodeDown,
 			Stats:         GetSystemStats(), // 获取并附加系统状态
+			PortForwards:  pfTraffic,
 		}
 
 		jsonData, _ := json.Marshal(report)
@@ -433,11 +442,12 @@ func (a *Agent) RunOnce() {
 	}
 
 	var result struct {
-		Config      string `json:"config"`
-		HashMatched bool   `json:"hash_matched"`
-		CertTask    bool   `json:"cert_task"`
-		Domain      string `json:"domain"`
-		CfToken     string `json:"cf_token"`
+		Config       string               `json:"config"`
+		HashMatched  bool                 `json:"hash_matched"`
+		CertTask     bool                 `json:"cert_task"`
+		Domain       string               `json:"domain"`
+		CfToken      string               `json:"cf_token"`
+		PortForwards []models.PortForward `json:"portforwards"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		log.Printf("Failed to decode sync response: %v", err)
@@ -449,6 +459,11 @@ func (a *Agent) RunOnce() {
 		// log.Println("Config not changed (hash matched), skipping apply.")
 	} else {
 		log.Println("Syncing state from controller (new config detected)...")
+	}
+
+	// 动态应用免审计端口转发规则
+	if a.fm != nil {
+		a.fm.ApplyRules(result.PortForwards)
 	}
 
 	// 2. 检查是否有证书申请任务，或者本地证书已失效 (主动防御)

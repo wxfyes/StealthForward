@@ -276,6 +276,14 @@ func main() {
 		v1.PUT("/mappings/:id", api.UpdateNodeMappingHandler)
 		v1.DELETE("/mappings/:id", api.DeleteNodeMappingHandler)
 
+		// 免审计端口转发管理 (PortForwards)
+		v1.GET("/portforwards", api.ListPortForwardsHandler)
+		v1.POST("/portforwards", api.CreatePortForwardHandler)
+		v1.PUT("/portforwards/:id", api.UpdatePortForwardHandler)
+		v1.DELETE("/portforwards/:id", api.DeletePortForwardHandler)
+		v1.POST("/portforwards/clear/:id", api.ClearPortForwardTrafficHandler)
+		v1.POST("/portforwards/toggle/:id", api.TogglePortForwardHandler)
+
 		// 触发 V2Board 同步
 		v1.POST("/sync", api.TriggerSyncHandler)
 

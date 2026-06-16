@@ -122,14 +122,31 @@ type SystemStats struct {
 
 // NodeTrafficReport 节点上报的流量汇总
 type NodeTrafficReport struct {
-	NodeID        uint          `json:"node_id"`
-	Traffic       []UserTraffic `json:"traffic"`
-	TotalUpload   int64         `json:"total_upload"`
-	TotalDownload int64         `json:"total_download"`
-	Stats         *SystemStats  `json:"stats,omitempty"` // 探针数据
+	NodeID        uint                  `json:"node_id"`
+	Traffic       []UserTraffic         `json:"traffic"`
+	TotalUpload   int64                 `json:"total_upload"`
+	TotalDownload int64                 `json:"total_download"`
+	Stats         *SystemStats          `json:"stats,omitempty"` // 探针数据
+	PortForwards  map[uint]TrafficStat  `json:"port_forwards,omitempty"` // 免审计端口转发流量 (key: RuleID)
 }
 
 type TrafficStat struct {
 	Upload   int64 `json:"upload"`
 	Download int64 `json:"download"`
+}
+
+// PortForward 代表独立的 Realm / Gost 端口转发规则 (免审计中转)
+type PortForward struct {
+	ID          uint      `json:"id" gorm:"primaryKey"`
+	Name        string    `json:"name"`
+	EntryNodeID uint      `json:"entry_node_id"`
+	ListenPort  int       `json:"listen_port"`
+	Type        string    `json:"type"`        // realm, gost
+	TunnelType  string    `json:"tunnel_type"` // none, gost_tunnel
+	TargetAddr  string    `json:"target_addr"` // 目标落地地址, 例如 1.2.3.4:5678
+	Status      string    `json:"status"`      // running, paused
+	Upload      int64     `json:"upload"`      // 累计上行流量 (bytes)
+	Download    int64     `json:"download"`    // 累计下行流量 (bytes)
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }

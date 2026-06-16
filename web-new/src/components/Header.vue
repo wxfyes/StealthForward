@@ -1,16 +1,9 @@
 <script setup>
 defineProps({
-  activeTab: String,
   isDark: Boolean
 })
 
-const emit = defineEmits(['update:activeTab', 'toggle-theme', 'refresh', 'logout'])
-
-const tabs = [
-  { key: 'dashboard', label: '概览' },
-  { key: 'mappings', label: '配置' },
-  { key: 'settings', label: '系统' }
-]
+const emit = defineEmits(['toggle-theme', 'refresh', 'logout'])
 
 const appVersion = import.meta.env.VITE_APP_VERSION || 'Dev'
 
@@ -143,18 +136,6 @@ function resetLicense() {
           >
             🛒 购买
           </a>
-        </div>
-      </div>
-
-      <!-- Tab Switcher -->
-      <div class="glass flex p-1 rounded-2xl items-center">
-        <div
-          v-for="tab in tabs"
-          :key="tab.key"
-          @click="$emit('update:activeTab', tab.key)"
-          :class="['tab-btn', activeTab === tab.key ? 'active' : '']"
-        >
-          {{ tab.label }}
         </div>
       </div>
 
