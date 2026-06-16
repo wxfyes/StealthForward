@@ -283,6 +283,7 @@ func main() {
 		v1.DELETE("/portforwards/:id", api.DeletePortForwardHandler)
 		v1.POST("/portforwards/clear/:id", api.ClearPortForwardTrafficHandler)
 		v1.POST("/portforwards/toggle/:id", api.TogglePortForwardHandler)
+		v1.GET("/portforwards/diagnose/:id", api.DiagnosePortForwardHandler)
 
 		// 触发 V2Board 同步
 		v1.POST("/sync", api.TriggerSyncHandler)

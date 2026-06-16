@@ -1,8 +1,10 @@
 package api
 
 import (
+	"net"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/wangn9900/StealthForward/internal/database"
@@ -28,8 +30,8 @@ func CreatePortForwardHandler(c *gin.Context) {
 	}
 
 	// 1. 校验端口范围
-	if rule.ListenPort < 9000 || rule.ListenPort > 65000 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "监听端口必须在 9000 到 65000 之间"})
+	if rule.ListenPort < 1 || rule.ListenPort > 65535 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "监听端口必须在 1 到 65535 之间"})
 		return
 	}
 
@@ -96,8 +98,8 @@ func UpdatePortForwardHandler(c *gin.Context) {
 
 	// 端口校验逻辑（如果端口有修改）
 	if req.ListenPort != existing.ListenPort {
-		if req.ListenPort < 9000 || req.ListenPort > 65000 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "监听端口必须在 9000 到 65000 之间"})
+		if req.ListenPort < 1 || req.ListenPort > 65535 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "监听端口必须在 1 到 65535 之间"})
 			return
 		}
 
@@ -207,4 +209,71 @@ func TogglePortForwardHandler(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, rule)
+}
+
+// DiagnosePortForwardHandler 规则连通性诊断接口
+func DiagnosePortForwardHandler(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid rule id"})
+		return
+	}
+
+	var rule models.PortForward
+	if err := database.DB.First(&rule, uint(id)).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "rule not found"})
+		return
+	}
+
+	// 1. 获取入口节点信息
+	var entry models.EntryNode
+	if err := database.DB.First(&entry, rule.EntryNodeID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "entry node not found"})
+		return
+	}
+
+	// 2. 诊断 Inbound (测试中控到中转入口机 IP:监听端口 的联通性)
+	inboundAddr := net.JoinHostPort(entry.IP, strconv.Itoa(rule.ListenPort))
+	if entry.IP == "" {
+		inboundAddr = net.JoinHostPort(entry.Domain, strconv.Itoa(rule.ListenPort))
+	}
+
+	inboundOK := false
+	var inboundMs int64 = 0
+
+	t1 := time.Now()
+	conn1, err1 := net.DialTimeout("tcp", inboundAddr, 2*time.Second)
+	if err1 == nil {
+		inboundOK = true
+		inboundMs = time.Since(t1).Milliseconds()
+		conn1.Close()
+	}
+
+	// 3. 诊断 Outbound (测试中控到落地目标地址的联通性)
+	outboundOK := false
+	var outboundMs int64 = 0
+
+	t2 := time.Now()
+	conn2, err2 := net.DialTimeout("tcp", rule.TargetAddr, 2*time.Second)
+	if err2 == nil {
+		outboundOK = true
+		outboundMs = time.Since(t2).Milliseconds()
+		conn2.Close()
+	}
+
+	// 返回诊断详情的 JSON 供前端弹窗展示
+	c.JSON(http.StatusOK, gin.H{
+		"rule_id":        rule.ID,
+		"rule_name":      rule.Name,
+		"entry_name":     entry.Name,
+		"inbound_addr":   inboundAddr,
+		"inbound_ok":     inboundOK,
+		"inbound_ms":     inboundMs,
+		"outbound_addr":  rule.TargetAddr,
+		"outbound_ok":    outboundOK,
+		"outbound_ms":    outboundMs,
+		"backend_tasks":  1,
+		"backend_failed": 0,
+	})
 }

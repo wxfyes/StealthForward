@@ -171,6 +171,31 @@ function getEntryNodeName(id) {
   const entry = entries.value.find(e => e.id === id)
   return entry ? entry.name : `未知节点 (ID: ${id})`
 }
+
+// Diagnose Modal States & Methods
+const showDiagnoseModal = ref(false)
+const diagnosing = ref(false)
+const diagnoseResult = ref(null)
+
+async function runDiagnose(rule) {
+  showDiagnoseModal.value = true
+  diagnosing.value = true
+  diagnoseResult.value = null
+  try {
+    const res = await apiGet(`/api/v1/portforwards/diagnose/${rule.id}`)
+    if (res && !res.error) {
+      diagnoseResult.value = res
+    } else {
+      alert(res?.error || '诊断失败')
+      showDiagnoseModal.value = false
+    }
+  } catch (err) {
+    alert(err.message || '网络连接失败')
+    showDiagnoseModal.value = false
+  } finally {
+    diagnosing.value = false
+  }
+}
 </script>
 
 <template>
@@ -228,13 +253,13 @@ function getEntryNodeName(id) {
 
       <div class="flex flex-col md:flex-row gap-3 w-full md:w-auto items-center">
         <!-- Entry filter -->
-        <select v-model="selectedEntryFilter" class="glass px-4 py-2 rounded-2xl text-sm border-0 focus:ring-0 outline-none w-full md:w-48 text-white">
-          <option value="">所有入口节点</option>
-          <option v-for="e in entries" :key="e.id" :value="e.id">{{ e.name }}</option>
+        <select v-model="selectedEntryFilter" class="glass px-4 py-2 rounded-2xl text-sm focus:ring-0 outline-none w-full md:w-48 text-gray-800 dark:text-white bg-white/20 dark:bg-black/20 border border-black/5 dark:border-white/5">
+          <option value="" class="text-gray-800 dark:text-white bg-white dark:bg-zinc-800">所有入口节点</option>
+          <option v-for="e in entries" :key="e.id" :value="e.id" class="text-gray-800 dark:text-white bg-white dark:bg-zinc-800">{{ e.name }}</option>
         </select>
         <!-- Search -->
         <div class="relative w-full md:w-64">
-          <input v-model="searchQuery" type="text" placeholder="搜索规则名称、端口、落地..." class="glass pl-10 pr-4 py-2 rounded-2xl text-sm border-0 focus:ring-0 outline-none text-white placeholder-gray-400 w-full" />
+          <input v-model="searchQuery" type="text" placeholder="搜索规则名称、端口、落地..." class="glass pl-10 pr-4 py-2 rounded-2xl text-sm focus:ring-0 outline-none text-gray-800 dark:text-white placeholder-gray-400 w-full bg-white/20 dark:bg-black/20 border border-black/5 dark:border-white/5" />
           <svg class="w-4 h-4 absolute left-3.5 top-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
           </svg>
@@ -291,6 +316,11 @@ function getEntryNodeName(id) {
                       <path v-else stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
                     </svg>
                   </button>
+                  <button @click="runDiagnose(rule)" class="p-1.5 rounded-xl hover:bg-sky-500/10 text-sky-400 transition" title="诊断联通性">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  </button>
                   <button @click="handleClear(rule)" class="p-1.5 rounded-xl hover:bg-amber-500/10 text-amber-400 transition" title="清空流量">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -329,40 +359,40 @@ function getEntryNodeName(id) {
         <div class="p-6 space-y-4">
           <!-- Name -->
           <div>
-            <label class="block text-xs font-semibold text-gray-300 uppercase mb-2">规则名称</label>
-            <input v-model="form.name" type="text" placeholder="例如: HK-Reality" class="glass px-4 py-2.5 rounded-2xl w-full text-sm text-white focus:ring-0 outline-none border-0" />
+            <label class="block text-xs font-semibold text-gray-400 dark:text-gray-300 uppercase mb-2">规则名称</label>
+            <input v-model="form.name" type="text" placeholder="例如: HK-Reality" class="glass px-4 py-2.5 rounded-2xl w-full text-sm text-gray-800 dark:text-white bg-white/20 dark:bg-black/20 focus:ring-0 outline-none border border-black/5 dark:border-white/5" />
           </div>
 
           <!-- Entry Node -->
           <div>
-            <label class="block text-xs font-semibold text-gray-300 uppercase mb-2">入口中转服务器</label>
-            <select v-model="form.entry_node_id" class="glass px-4 py-2.5 rounded-2xl w-full text-sm text-white focus:ring-0 outline-none border-0">
-              <option v-for="e in entries" :key="e.id" :value="e.id">{{ e.name }}</option>
+            <label class="block text-xs font-semibold text-gray-400 dark:text-gray-300 uppercase mb-2">入口中转服务器</label>
+            <select v-model="form.entry_node_id" class="glass px-4 py-2.5 rounded-2xl w-full text-sm text-gray-800 dark:text-white bg-white/20 dark:bg-black/20 focus:ring-0 outline-none border border-black/5 dark:border-white/5">
+              <option v-for="e in entries" :key="e.id" :value="e.id" class="text-gray-800 dark:text-white bg-white dark:bg-zinc-800">{{ e.name }}</option>
             </select>
           </div>
 
           <div class="grid grid-cols-2 gap-4">
             <!-- Port -->
             <div>
-              <label class="block text-xs font-semibold text-gray-300 uppercase mb-2">中转监听端口 (9000-65000)</label>
-              <input v-model="form.listen_port" type="number" min="9000" max="65000" class="glass px-4 py-2.5 rounded-2xl w-full text-sm text-white focus:ring-0 outline-none border-0 font-mono" />
+              <label class="block text-xs font-semibold text-gray-400 dark:text-gray-300 uppercase mb-2">中转监听端口 (1-65535)</label>
+              <input v-model="form.listen_port" type="number" min="1" max="65535" class="glass px-4 py-2.5 rounded-2xl w-full text-sm text-gray-800 dark:text-white bg-white/20 dark:bg-black/20 focus:ring-0 outline-none border border-black/5 dark:border-white/5 font-mono" />
             </div>
 
             <!-- Forward Engine -->
             <div>
-              <label class="block text-xs font-semibold text-gray-300 uppercase mb-2">转发引擎</label>
-              <select v-model="form.type" class="glass px-4 py-2.5 rounded-2xl w-full text-sm text-white focus:ring-0 outline-none border-0">
-                <option value="realm">Realm (极轻量 / 零拷贝)</option>
-                <option value="gost">Gost (双向 TCP+UDP)</option>
+              <label class="block text-xs font-semibold text-gray-400 dark:text-gray-300 uppercase mb-2">转发引擎</label>
+              <select v-model="form.type" class="glass px-4 py-2.5 rounded-2xl w-full text-sm text-gray-800 dark:text-white bg-white/20 dark:bg-black/20 focus:ring-0 outline-none border border-black/5 dark:border-white/5">
+                <option value="realm" class="text-gray-800 dark:text-white bg-white dark:bg-zinc-800">Realm (极轻量 / 零拷贝)</option>
+                <option value="gost" class="text-gray-800 dark:text-white bg-white dark:bg-zinc-800">Gost (双向 TCP+UDP)</option>
               </select>
             </div>
           </div>
 
           <!-- Target Remote Address -->
           <div>
-            <label class="block text-xs font-semibold text-gray-300 uppercase mb-2">落地目标地址 (IP:Port / 域名:Port)</label>
-            <input v-model="form.target_addr" type="text" placeholder="例如: 203.88.117.67:443" class="glass px-4 py-2.5 rounded-2xl w-full text-sm text-white focus:ring-0 outline-none border-0 font-mono" />
-            <p class="text-[0.7rem] text-primary-400 mt-1.5">★ 注意：转发为四层透明转发，请保证目的端口的真实性</p>
+            <label class="block text-xs font-semibold text-gray-400 dark:text-gray-300 uppercase mb-2">落地目标地址 (IP:Port / 域名:Port)</label>
+            <input v-model="form.target_addr" type="text" placeholder="例如: 203.88.117.67:443" class="glass px-4 py-2.5 rounded-2xl w-full text-sm text-gray-800 dark:text-white bg-white/20 dark:bg-black/20 focus:ring-0 outline-none border border-black/5 dark:border-white/5 font-mono" />
+            <p class="text-[0.7rem] text-primary-500 dark:text-primary-400 mt-1.5 font-medium">★ 注意：转发为四层透明转发，请保证目的端口的真实性</p>
           </div>
         </div>
 
@@ -371,6 +401,74 @@ function getEntryNodeName(id) {
           <button @click="handleSubmit(showEditModal)" :disabled="submitting" class="bg-primary-600 hover:bg-primary-500 text-white font-bold text-sm px-5 py-2 rounded-2xl transition disabled:opacity-50">
             {{ submitting ? '保存中...' : '确认保存' }}
           </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Diagnose Modal (1:1 Match to Image 2) -->
+    <div v-if="showDiagnoseModal" class="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-fade-in">
+      <div class="glass rounded-3xl w-full max-w-lg overflow-hidden border border-white/10 shadow-2xl">
+        <div class="p-6 border-b border-white/5 flex justify-between items-center">
+          <h3 class="text-lg font-bold text-gray-800 dark:text-white">诊断结果 ({{ diagnoseResult ? `#${diagnoseResult.rule_id}` : '加载中...' }})</h3>
+          <button @click="showDiagnoseModal = false" class="text-gray-400 hover:text-gray-600 dark:hover:text-white transition">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <div class="p-6 space-y-5">
+          <!-- Inbound Diagnose -->
+          <div>
+            <div class="text-sm font-bold text-gray-800 dark:text-white mb-2">入口诊断 (Inbound)</div>
+            <div class="border border-black/5 dark:border-white/5 rounded-2xl p-4 bg-black/5 dark:bg-black/25">
+              <div class="flex justify-between items-center mb-2">
+                <span class="text-sm font-semibold text-gray-700 dark:text-gray-300">{{ diagnoseResult?.entry_name || '中转入口节点' }}</span>
+                <span class="text-[0.7rem] px-2 py-0.5 rounded-md bg-primary-500/10 text-primary-500 border border-primary-500/20 font-mono">GID: {{ diagnoseResult?.rule_id || '-' }}</span>
+              </div>
+              
+              <div class="text-xs text-gray-500 dark:text-gray-400 bg-white/50 dark:bg-zinc-800/50 p-3 rounded-xl border border-black/5 dark:border-white/5 font-mono space-y-1">
+                <div class="text-xs font-bold text-gray-600 dark:text-gray-400 mb-1">诊断结果详情</div>
+                <div v-if="diagnosing" class="animate-pulse text-primary-500">正在诊断联通性，请稍候...</div>
+                <div v-else-if="diagnoseResult">
+                  <div>目标地址数: 1/1</div>
+                  <div :class="diagnoseResult.inbound_ok ? 'text-emerald-500 dark:text-emerald-400' : 'text-rose-500 dark:text-rose-400'">
+                    [0] {{ diagnoseResult.inbound_ok ? `用时 ${diagnoseResult.inbound_ms} ms` : '连接超时' }} 地址: {{ diagnoseResult.inbound_addr }}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Outbounds Diagnose -->
+          <div>
+            <div class="text-sm font-bold text-gray-800 dark:text-white mb-2">出口诊断 (Outbounds)</div>
+            <div class="text-xs text-gray-500 dark:text-gray-400 bg-white/50 dark:bg-zinc-800/50 p-4 rounded-xl border border-black/5 dark:border-white/5 font-mono">
+              <div v-if="diagnosing" class="animate-pulse">正在检测落地端联通性...</div>
+              <div v-else-if="diagnoseResult">
+                <div v-if="diagnoseResult.outbound_ok" class="text-emerald-500 dark:text-emerald-400">
+                  [0] 用时 {{ diagnoseResult.outbound_ms }} ms 地址: {{ diagnoseResult.outbound_addr }} (通畅)
+                </div>
+                <div v-else class="text-rose-500 dark:text-rose-400">
+                  [0] 连接超时，地址: {{ diagnoseResult.outbound_addr }} (不可达)
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Backend Diagnose -->
+          <div>
+            <div class="text-sm font-bold text-gray-800 dark:text-white mb-2">面板反馈 (Backend)</div>
+            <div class="text-xs text-gray-500 dark:text-gray-400 bg-white/50 dark:bg-zinc-800/50 p-4 rounded-xl border border-black/5 dark:border-white/5 font-mono space-y-1">
+              <div>发出任务 1</div>
+              <div>发出失败 {{ diagnoseResult && !diagnoseResult.inbound_ok ? 1 : 0 }}</div>
+              <div>回收任务 1</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="p-6 border-t border-white/5 flex justify-end bg-white/5">
+          <button @click="showDiagnoseModal = false" class="bg-primary-600 hover:bg-primary-500 text-white font-bold text-sm px-6 py-2.5 rounded-2xl transition shadow-lg shadow-primary-500/20">关闭</button>
         </div>
       </div>
     </div>
