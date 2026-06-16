@@ -216,6 +216,28 @@ async function runDiagnose(rule) {
     diagnosing.value = false
   }
 }
+
+function getEntryConnectAddr(rule) {
+  if (!entries || !entries.value) return `:${rule?.listen_port}`
+  const entry = entries.value.find(e => e.id === rule.entry_node_id)
+  if (!entry) return `:${rule.listen_port}`
+  const host = entry.domain || entry.ip
+  return `${host}:${rule.listen_port}`
+}
+
+function copyText(text) {
+  navigator.clipboard.writeText(text).then(() => {
+    alert('中转地址已成功复制到剪贴板！')
+  }).catch(() => {
+    const input = document.createElement('input')
+    input.setAttribute('value', text)
+    document.body.appendChild(input)
+    input.select()
+    document.execCommand('copy')
+    document.body.removeChild(input)
+    alert('中转地址已成功复制！')
+  })
+}
 </script>
 
 <template>
