@@ -162,7 +162,7 @@ async function fetchSettings() {
             @click="activeTab = 'forwards'"
             :class="['flex items-center gap-3 px-4 py-3 rounded-2xl cursor-pointer transition text-sm font-medium', activeTab === 'forwards' ? 'bg-primary-600/10 text-primary-400 border border-primary-500/20' : 'text-gray-400 hover:bg-white/5 hover:text-white']"
           >
-            🔄 免审计中转
+            🔄 端口转发
           </div>
           <div
             @click="activeTab = 'settings'"
@@ -191,7 +191,7 @@ async function fetchSettings() {
       </div>
       <div @click="activeTab = 'forwards'" :class="['flex flex-col items-center p-2 rounded-xl text-xs transition', activeTab === 'forwards' ? 'text-primary-400' : 'text-gray-500']">
         <span class="text-lg">🔄</span>
-        <span class="mt-0.5">中转</span>
+        <span class="mt-0.5">转发</span>
       </div>
       <div @click="activeTab = 'settings'" :class="['flex flex-col items-center p-2 rounded-xl text-xs transition', activeTab === 'settings' ? 'text-primary-400' : 'text-gray-500']">
         <span class="text-lg">🛠️</span>

@@ -271,7 +271,7 @@ function copyText(text) {
 
       <div class="glass p-5 rounded-3xl flex items-center justify-between">
         <div>
-          <div class="text-sm font-medium text-[var(--text-muted)] mb-1">总跑量 (免审计)</div>
+          <div class="text-sm font-medium text-[var(--text-muted)] mb-1">总跑量 (端口转发)</div>
           <div class="text-3xl font-light text-amber-400">{{ totalTraffic }}</div>
         </div>
         <div class="p-3 bg-amber-500/10 rounded-2xl">
