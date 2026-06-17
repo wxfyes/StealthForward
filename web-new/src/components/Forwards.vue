@@ -334,7 +334,7 @@ function copyText(text) {
               <td class="p-4 text-gray-600 dark:text-gray-300">{{ getEntryNodeName(rule.entry_node_id) }}</td>
               <td class="p-4 font-mono font-bold text-primary-400">
                 <div class="flex items-center gap-1.5">
-                  <span class="truncate max-w-[220px]" :title="getEntryConnectAddr(rule)">{{ getEntryConnectAddr(rule) }}</span>
+                  <span class="truncate max-w-[400px] lg:max-w-none" :title="getEntryConnectAddr(rule)">{{ getEntryConnectAddr(rule) }}</span>
                   <button @click="copyText(getEntryConnectAddr(rule))" class="p-1 rounded hover:bg-black/10 dark:hover:bg-white/10 text-gray-400 hover:text-gray-600 dark:hover:text-white transition" title="复制中转连接地址">
                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
@@ -347,7 +347,7 @@ function copyText(text) {
                   {{ rule.type }}
                 </span>
               </td>
-              <td class="p-4 font-mono text-xs text-gray-500 dark:text-gray-400 max-w-[200px] truncate" :title="rule.target_addr">{{ rule.target_addr }}</td>
+              <td class="p-4 font-mono text-xs text-gray-500 dark:text-gray-400 max-w-[350px] lg:max-w-none truncate" :title="rule.target_addr">{{ rule.target_addr }}</td>
               <td class="p-4 text-right font-mono text-xs">
                 <div class="text-emerald-400">↑ {{ formatBytes(rule.upload) }}</div>
                 <div class="text-indigo-400">↓ {{ formatBytes(rule.download) }}</div>

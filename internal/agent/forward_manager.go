@@ -308,8 +308,7 @@ func (fm *ForwardManager) readIptablesTraffic() {
 		return
 	}
 
-	fm.mu.Lock()
-	defer fm.mu.Unlock()
+	tempTraffic := make(map[uint]models.TrafficStat)
 
 	// 逐行匹配解析
 	scannerIn := bufio.NewScanner(bytes.NewReader(inputBytes))
@@ -319,9 +318,9 @@ func (fm *ForwardManager) readIptablesTraffic() {
 			bytesVal, _ := strconv.ParseInt(matches[1], 10, 64)
 			ruleID, _ := strconv.ParseUint(matches[3], 10, 32)
 			
-			stat := fm.traffic[uint(ruleID)]
-			stat.Upload = bytesVal // INPUT 对应的是用户的上传量 (发往中继端口的流量)
-			fm.traffic[uint(ruleID)] = stat
+			stat := tempTraffic[uint(ruleID)]
+			stat.Upload += bytesVal // INPUT 对应的是用户的上传量 (发往中继端口的流量)
+			tempTraffic[uint(ruleID)] = stat
 		}
 	}
 
@@ -332,11 +331,17 @@ func (fm *ForwardManager) readIptablesTraffic() {
 			bytesVal, _ := strconv.ParseInt(matches[1], 10, 64)
 			ruleID, _ := strconv.ParseUint(matches[3], 10, 32)
 
-			stat := fm.traffic[uint(ruleID)]
-			stat.Download = bytesVal // OUTPUT 对应的是用户的下载量 (从中继端口发给用户的流量)
-			fm.traffic[uint(ruleID)] = stat
+			stat := tempTraffic[uint(ruleID)]
+			stat.Download += bytesVal // OUTPUT 对应的是用户的下载量 (从中继端口发给用户的流量)
+			tempTraffic[uint(ruleID)] = stat
 		}
 	}
+
+	fm.mu.Lock()
+	defer fm.mu.Unlock()
+
+	// 替换为最新的累加统计
+	fm.traffic = tempTraffic
 }
 
 // ================= iptables 防火墙精细化交互操作 =================

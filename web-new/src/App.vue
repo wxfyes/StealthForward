@@ -13,7 +13,7 @@ const { isDark, toggleTheme } = useTheme()
 const { apiGet, apiPost } = useApi()
 
 // State
-const activeTab = ref('dashboard')
+const activeTab = ref(localStorage.getItem('stealth_active_tab') || 'dashboard')
 const isAuthenticated = ref(false)
 const entries = ref([])
 const exits = ref([])
@@ -102,6 +102,7 @@ function handleLogin() {
 function logout() {
   if (refreshTimer.value) clearInterval(refreshTimer.value)
   localStorage.removeItem('stealth_token')
+  localStorage.removeItem('stealth_active_tab')
   isAuthenticated.value = false
   entries.value = []
   exits.value = []
@@ -110,8 +111,9 @@ function logout() {
   portForwards.value = []
 }
 
-// Watch for tab changes to fetch settings
+// Watch for tab changes to fetch settings and persist tab
 watch(activeTab, (val) => {
+  localStorage.setItem('stealth_active_tab', val)
   if (val === 'settings') {
     fetchSettings()
   }
@@ -173,7 +175,7 @@ async function fetchSettings() {
       
       <!-- 底部版本 -->
       <div class="px-2 text-[var(--text-muted)] text-xs font-mono">
-        Version v3.9.5
+        Version v3.9.6
       </div>
     </aside>
 
@@ -198,7 +200,7 @@ async function fetchSettings() {
     </nav>
 
     <!-- 右侧主内容区 -->
-    <main class="flex-1 p-4 md:p-8 overflow-y-auto max-w-7xl w-full mx-auto pb-24 md:pb-8">
+    <main class="flex-1 p-4 md:p-8 overflow-y-auto max-w-full w-full pb-24 md:pb-8">
       <!-- Header -->
       <Header
         :isDark="isDark"
