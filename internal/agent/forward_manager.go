@@ -297,13 +297,13 @@ func (fm *ForwardManager) collectTrafficLoop() {
 // readIptablesTraffic 运行 iptables 读取并解析流量，极其温和
 func (fm *ForwardManager) readIptablesTraffic() {
 	// 1. 获取 INPUT (下载量)
-	inputBytes, err := exec.Command("iptables", "-vx", "-L", "INPUT").Output()
+	inputBytes, err := exec.Command("iptables", "-vnx", "-L", "INPUT").Output()
 	if err != nil {
 		return
 	}
 
 	// 2. 获取 OUTPUT (上传量)
-	outputBytes, err := exec.Command("iptables", "-vx", "-L", "OUTPUT").Output()
+	outputBytes, err := exec.Command("iptables", "-vnx", "-L", "OUTPUT").Output()
 	if err != nil {
 		return
 	}
@@ -371,7 +371,7 @@ func removeIptables(ruleID uint, port int) {
 
 func cleanIptablesRules() {
 	// 批量找出我们加的 comment 并删除
-	inputBytes, err := exec.Command("iptables", "-vx", "-L", "INPUT").Output()
+	inputBytes, err := exec.Command("iptables", "-vnx", "-L", "INPUT").Output()
 	if err == nil {
 		scanner := bufio.NewScanner(bytes.NewReader(inputBytes))
 		for scanner.Scan() {
@@ -385,7 +385,7 @@ func cleanIptablesRules() {
 		}
 	}
 
-	outputBytes, err := exec.Command("iptables", "-vx", "-L", "OUTPUT").Output()
+	outputBytes, err := exec.Command("iptables", "-vnx", "-L", "OUTPUT").Output()
 	if err == nil {
 		scanner := bufio.NewScanner(bytes.NewReader(outputBytes))
 		for scanner.Scan() {
