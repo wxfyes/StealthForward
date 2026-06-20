@@ -96,8 +96,8 @@ func UpdatePortForwardHandler(c *gin.Context) {
 		return
 	}
 
-	// 端口校验逻辑（如果端口有修改）
-	if req.ListenPort != existing.ListenPort {
+	// 端口校验逻辑（如果端口或入口节点有修改）
+	if req.ListenPort != existing.ListenPort || req.EntryNodeID != existing.EntryNodeID {
 		if req.ListenPort < 1 || req.ListenPort > 65535 {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "监听端口必须在 1 到 65535 之间"})
 			return
@@ -128,6 +128,7 @@ func UpdatePortForwardHandler(c *gin.Context) {
 		}
 
 		existing.ListenPort = req.ListenPort
+		existing.EntryNodeID = req.EntryNodeID
 	}
 
 	// 更新其他字段
