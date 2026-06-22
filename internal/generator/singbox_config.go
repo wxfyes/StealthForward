@@ -160,9 +160,11 @@ func GenerateEntryConfig(entry *models.EntryNode, rules []models.ForwardingRule,
 				if r.UserEmail != "" {
 					u["name"] = r.UserEmail
 				}
-				// 仅当 VLESS 且传输层为 TCP 或空（默认）时才加 flow (若 security 为 none 则不加，留空或 xtls-rprx-vision 默认加流控)
+				// 仅当 VLESS 且传输层为 TCP 或空（默认）时才加 flow (支持 mom-vision 极速流控，若 security 为 none 则不加，留空或 xtls-rprx-vision 默认加常规流控)
 				if entry.Transport == "" || entry.Transport == "tcp" {
-					if entry.Security == "" || entry.Security == "xtls-vision" || entry.Security == "xtls-rprx-vision" {
+					if entry.Security == "mom-vision" {
+						u["flow"] = "mom-vision"
+					} else if entry.Security == "" || entry.Security == "xtls-vision" || entry.Security == "xtls-rprx-vision" {
 						u["flow"] = "xtls-rprx-vision"
 					}
 				}

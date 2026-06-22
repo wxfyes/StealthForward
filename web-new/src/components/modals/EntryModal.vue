@@ -238,6 +238,7 @@ async function handleSubmit() {
         <label v-if="form.protocol === 'vless' && (form.transport === 'tcp' || !form.transport)" class="md:col-span-2 flex flex-col gap-1.5 text-[var(--text-muted)]">
           流控选项 (Flow)
           <select v-model="form.security">
+            <option value="mom-vision">MOM-Vision (自研极速流控)</option>
             <option value="xtls-rprx-vision">XTLS-Vision (开启流控混淆)</option>
             <option value="none">none (无流控，跑纯净模式)</option>
           </select>
