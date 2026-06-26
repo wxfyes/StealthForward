@@ -7,6 +7,7 @@ package reality
 import (
 	"errors"
 	"fmt"
+	"math/rand"
 	"slices"
 	"strings"
 
@@ -745,101 +746,145 @@ type serverHelloMsg struct {
 
 func (m *serverHelloMsg) marshal() ([]byte, error) {
 	var exts cryptobyte.Builder
+
+	type extItem struct {
+		id    uint16
+		write func(b *cryptobyte.Builder)
+	}
+	var extList []extItem
+
 	if m.ocspStapling {
-		exts.AddUint16(extensionStatusRequest)
-		exts.AddUint16(0) // empty extension_data
+		extList = append(extList, extItem{id: extensionStatusRequest, write: func(b *cryptobyte.Builder) {
+			b.AddUint16(extensionStatusRequest)
+			b.AddUint16(0) // empty extension_data
+		}})
 	}
 	if m.ticketSupported {
-		exts.AddUint16(extensionSessionTicket)
-		exts.AddUint16(0) // empty extension_data
+		extList = append(extList, extItem{id: extensionSessionTicket, write: func(b *cryptobyte.Builder) {
+			b.AddUint16(extensionSessionTicket)
+			b.AddUint16(0) // empty extension_data
+		}})
 	}
 	if m.secureRenegotiationSupported {
-		exts.AddUint16(extensionRenegotiationInfo)
-		exts.AddUint16LengthPrefixed(func(exts *cryptobyte.Builder) {
-			exts.AddUint8LengthPrefixed(func(exts *cryptobyte.Builder) {
-				exts.AddBytes(m.secureRenegotiation)
-			})
-		})
-	}
-	if m.extendedMasterSecret {
-		exts.AddUint16(extensionExtendedMasterSecret)
-		exts.AddUint16(0) // empty extension_data
-	}
-	if len(m.alpnProtocol) > 0 {
-		exts.AddUint16(extensionALPN)
-		exts.AddUint16LengthPrefixed(func(exts *cryptobyte.Builder) {
-			exts.AddUint16LengthPrefixed(func(exts *cryptobyte.Builder) {
+		extList = append(extList, extItem{id: extensionRenegotiationInfo, write: func(b *cryptobyte.Builder) {
+			b.AddUint16(extensionRenegotiationInfo)
+			b.AddUint16LengthPrefixed(func(exts *cryptobyte.Builder) {
 				exts.AddUint8LengthPrefixed(func(exts *cryptobyte.Builder) {
-					exts.AddBytes([]byte(m.alpnProtocol))
+					exts.AddBytes(m.secureRenegotiation)
 				})
 			})
-		})
+		}})
+	}
+	if m.extendedMasterSecret {
+		extList = append(extList, extItem{id: extensionExtendedMasterSecret, write: func(b *cryptobyte.Builder) {
+			b.AddUint16(extensionExtendedMasterSecret)
+			b.AddUint16(0) // empty extension_data
+		}})
+	}
+	if len(m.alpnProtocol) > 0 {
+		extList = append(extList, extItem{id: extensionALPN, write: func(b *cryptobyte.Builder) {
+			b.AddUint16(extensionALPN)
+			b.AddUint16LengthPrefixed(func(exts *cryptobyte.Builder) {
+				exts.AddUint16LengthPrefixed(func(exts *cryptobyte.Builder) {
+					exts.AddUint8LengthPrefixed(func(exts *cryptobyte.Builder) {
+						exts.AddBytes([]byte(m.alpnProtocol))
+					})
+				})
+			})
+		}})
 	}
 	if len(m.scts) > 0 {
-		exts.AddUint16(extensionSCT)
-		exts.AddUint16LengthPrefixed(func(exts *cryptobyte.Builder) {
-			exts.AddUint16LengthPrefixed(func(exts *cryptobyte.Builder) {
-				for _, sct := range m.scts {
-					exts.AddUint16LengthPrefixed(func(exts *cryptobyte.Builder) {
-						exts.AddBytes(sct)
-					})
-				}
+		extList = append(extList, extItem{id: extensionSCT, write: func(b *cryptobyte.Builder) {
+			b.AddUint16(extensionSCT)
+			b.AddUint16LengthPrefixed(func(exts *cryptobyte.Builder) {
+				exts.AddUint16LengthPrefixed(func(exts *cryptobyte.Builder) {
+					for _, sct := range m.scts {
+						exts.AddUint16LengthPrefixed(func(exts *cryptobyte.Builder) {
+							exts.AddBytes(sct)
+						})
+					}
+				})
 			})
-		})
+		}})
 	}
 	if m.supportedVersion != 0 {
-		exts.AddUint16(extensionSupportedVersions)
-		exts.AddUint16LengthPrefixed(func(exts *cryptobyte.Builder) {
-			exts.AddUint16(m.supportedVersion)
-		})
+		extList = append(extList, extItem{id: extensionSupportedVersions, write: func(b *cryptobyte.Builder) {
+			b.AddUint16(extensionSupportedVersions)
+			b.AddUint16LengthPrefixed(func(exts *cryptobyte.Builder) {
+				exts.AddUint16(m.supportedVersion)
+			})
+		}})
 	}
 	if m.serverShare.group != 0 {
-		exts.AddUint16(extensionKeyShare)
-		exts.AddUint16LengthPrefixed(func(exts *cryptobyte.Builder) {
-			exts.AddUint16(uint16(m.serverShare.group))
-			exts.AddUint16LengthPrefixed(func(exts *cryptobyte.Builder) {
-				exts.AddBytes(m.serverShare.data)
+		extList = append(extList, extItem{id: extensionKeyShare, write: func(b *cryptobyte.Builder) {
+			b.AddUint16(extensionKeyShare)
+			b.AddUint16LengthPrefixed(func(exts *cryptobyte.Builder) {
+				exts.AddUint16(uint16(m.serverShare.group))
+				exts.AddUint16LengthPrefixed(func(exts *cryptobyte.Builder) {
+					exts.AddBytes(m.serverShare.data)
+				})
 			})
-		})
+		}})
 	}
+	if len(m.cookie) > 0 {
+		extList = append(extList, extItem{id: extensionCookie, write: func(b *cryptobyte.Builder) {
+			b.AddUint16(extensionCookie)
+			b.AddUint16LengthPrefixed(func(exts *cryptobyte.Builder) {
+				exts.AddUint16LengthPrefixed(func(exts *cryptobyte.Builder) {
+					exts.AddBytes(m.cookie)
+				})
+			})
+		}})
+	}
+	if m.selectedGroup != 0 {
+		extList = append(extList, extItem{id: extensionKeyShare, write: func(b *cryptobyte.Builder) {
+			b.AddUint16(extensionKeyShare)
+			b.AddUint16LengthPrefixed(func(exts *cryptobyte.Builder) {
+				exts.AddUint16(uint16(m.selectedGroup))
+			})
+		}})
+	}
+	if len(m.supportedPoints) > 0 {
+		extList = append(extList, extItem{id: extensionSupportedPoints, write: func(b *cryptobyte.Builder) {
+			b.AddUint16(extensionSupportedPoints)
+			b.AddUint16LengthPrefixed(func(exts *cryptobyte.Builder) {
+				exts.AddUint8LengthPrefixed(func(exts *cryptobyte.Builder) {
+					exts.AddBytes(m.supportedPoints)
+				})
+			})
+		}})
+	}
+	if len(m.encryptedClientHello) > 0 {
+		extList = append(extList, extItem{id: extensionEncryptedClientHello, write: func(b *cryptobyte.Builder) {
+			b.AddUint16(extensionEncryptedClientHello)
+			b.AddUint16LengthPrefixed(func(exts *cryptobyte.Builder) {
+				exts.AddBytes(m.encryptedClientHello)
+			})
+		}})
+	}
+	if m.serverNameAck {
+		extList = append(extList, extItem{id: extensionServerName, write: func(b *cryptobyte.Builder) {
+			b.AddUint16(extensionServerName)
+			b.AddUint16(0)
+		}})
+	}
+
+	// Shuffle extensions randomly
+	rand.Shuffle(len(extList), func(i, j int) {
+		extList[i], extList[j] = extList[j], extList[i]
+	})
+
+	// Write shuffled extensions
+	for _, item := range extList {
+		item.write(&exts)
+	}
+
+	// PreSharedKey must be the last extension if present
 	if m.selectedIdentityPresent {
 		exts.AddUint16(extensionPreSharedKey)
 		exts.AddUint16LengthPrefixed(func(exts *cryptobyte.Builder) {
 			exts.AddUint16(m.selectedIdentity)
 		})
-	}
-
-	if len(m.cookie) > 0 {
-		exts.AddUint16(extensionCookie)
-		exts.AddUint16LengthPrefixed(func(exts *cryptobyte.Builder) {
-			exts.AddUint16LengthPrefixed(func(exts *cryptobyte.Builder) {
-				exts.AddBytes(m.cookie)
-			})
-		})
-	}
-	if m.selectedGroup != 0 {
-		exts.AddUint16(extensionKeyShare)
-		exts.AddUint16LengthPrefixed(func(exts *cryptobyte.Builder) {
-			exts.AddUint16(uint16(m.selectedGroup))
-		})
-	}
-	if len(m.supportedPoints) > 0 {
-		exts.AddUint16(extensionSupportedPoints)
-		exts.AddUint16LengthPrefixed(func(exts *cryptobyte.Builder) {
-			exts.AddUint8LengthPrefixed(func(exts *cryptobyte.Builder) {
-				exts.AddBytes(m.supportedPoints)
-			})
-		})
-	}
-	if len(m.encryptedClientHello) > 0 {
-		exts.AddUint16(extensionEncryptedClientHello)
-		exts.AddUint16LengthPrefixed(func(exts *cryptobyte.Builder) {
-			exts.AddBytes(m.encryptedClientHello)
-		})
-	}
-	if m.serverNameAck {
-		exts.AddUint16(extensionServerName)
-		exts.AddUint16(0)
 	}
 
 	extBytes, err := exts.Bytes()
