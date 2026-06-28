@@ -79,4 +79,17 @@ wget -O /root/install.sh https://raw.githubusercontent.com/wangn9900/StealthForw
 *   **Controller**: 负责策略下发、证书管理、V2Board 同步。
 
 ---
+
+## ⚠️ 开发者与 AI 开发提示 (Developer & AI Instructions)
+
+### 关于魔改内核 (sing-box_mod) 与主控依赖同步的说明
+
+*   **独立内核构建**：独立内核二进制 `sing-box-mod`（中转机上的 `/usr/local/bin/stealth-core`）在 GitHub CI 流程中，会直接通过克隆并编译 `wxfyes/sing-box_mod` 仓库的最新代码生成。
+*   **Agent 内置内核构建**：Agent 命令行带 `-internal` 参数时会启用内置内核服务。在编译 `stealth-agent` 二进制文件时，GitHub CI 使用了 **`-mod=vendor`** 参数。
+*   **同步要求**：
+    由于使用 `vendor` 依赖树编译，**所有对 `sing-box_mod` 仓库的源码修改，都必须物理同步至 `StealthForward` 的 `vendor/github.com/sagernet/sing-box/` 目录下**！
+    *   **同步方法**：在 `StealthForward` 项目根目录下执行 `go mod vendor`，或直接物理复制替换 `vendor/github.com/sagernet/sing-box/` 中的对应修改文件，并提交 `vendor/` 的变更推送。
+    *   **若不同步**：直接编译推送主控，内置内核（Agent -internal）将使用旧版缓存，导致最新修改的内核功能无法生效。
+
+---
 *Powered by StealthForward Team | v2.1.46 Stable*

@@ -186,4 +186,10 @@ require (
 	modernc.org/sqlite v1.23.1 // indirect
 )
 
+// ⚠️ 开发者与 AI 开发提示 (CRITICAL NOTICE FOR DEVELOPERS & AI AGENTS):
+// 虽然我们在下方 replace 了 github.com/sagernet/sing-box => ../sing-box_mod，
+// 但在 GitHub Actions CI 编译 Agent 时，使用的是 "-mod=vendor" 参数进行依赖编译。
+// 因此，任何对 ../sing-box_mod 仓库源码的修改，都必须物理同步到 StealthForward 的 vendor 目录下！
+// 同步方法：在 StealthForward 根目录下运行 "go mod vendor" (若文件被占用，可手动复制覆盖)，
+// 并将修改后的 vendor 目录提交推送。否则内置内核将不会包含最新修改！
 replace github.com/sagernet/sing-box => ../sing-box_mod
