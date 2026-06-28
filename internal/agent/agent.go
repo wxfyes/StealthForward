@@ -33,7 +33,7 @@ import (
 
 const (
 	// Version 客户端版本号
-	Version = "v3.9.7"
+	Version = "v3.9.11"
 )
 
 type Config struct {
@@ -453,6 +453,7 @@ func (a *Agent) RunOnce() {
 		log.Printf("Failed to decode sync response: %v", err)
 		return
 	}
+	result.Domain = strings.TrimSpace(result.Domain)
 
 	if result.HashMatched {
 		// 配置未发生改变，只打印 debug 日志
