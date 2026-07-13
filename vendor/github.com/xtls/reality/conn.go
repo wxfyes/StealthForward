@@ -16,7 +16,6 @@ import (
 	"fmt"
 	"hash"
 	"io"
-	mrand "math/rand"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -26,11 +25,10 @@ import (
 // A Conn represents a secured connection.
 // It implements the net.Conn interface.
 type Conn struct {
-	AuthKey           []byte
-	ClientVer         [3]byte
-	ClientTime        time.Time
-	ClientShortId     [8]byte
-	MaxUselessRecords int
+	AuthKey       []byte
+	ClientVer     [3]byte
+	ClientTime    time.Time
+	ClientShortId [8]byte
 
 	// constant
 	conn        net.Conn
@@ -530,57 +528,31 @@ func (hc *halfConn) encrypt(record, payload []byte, rand io.Reader) ([]byte, err
 			// Encrypt the actual ContentType and replace the plaintext one.
 			record = append(record, record[0])
 			padding := 0
-			if recordType(record[0]) == recordTypeHandshake {
-				hasOrigPadding := false
-				if hc.handshakeLen[1] != 0 {
-					switch payload[0] {
-					case typeEncryptedExtensions:
-						padding = hc.handshakeLen[2]
-						hc.handshakeLen[2] = 0
-						hasOrigPadding = true
-					case typeCertificate:
-						padding = hc.handshakeLen[3]
-						hc.handshakeLen[3] = 0
-						hasOrigPadding = true
-					case typeCertificateVerify:
-						padding = hc.handshakeLen[4]
-						hc.handshakeLen[4] = 0
-						hasOrigPadding = true
-					case typeFinished:
-						padding = hc.handshakeLen[5]
-						hc.handshakeLen[5] = 0
-						hasOrigPadding = true
-					case typeNewSessionTicket:
-						padding = hc.handshakeLen[6]
-						hc.handshakeLen[6] = 0
-						record[5] = byte(recordTypeApplicationData)
-						record[6] = 0
-						hasOrigPadding = true
-					}
+			if recordType(record[0]) == recordTypeHandshake && hc.handshakeLen[1] != 0 {
+				switch payload[0] {
+				case typeEncryptedExtensions:
+					padding = hc.handshakeLen[2]
+					hc.handshakeLen[2] = 0
+				case typeCertificate:
+					padding = hc.handshakeLen[3]
+					hc.handshakeLen[3] = 0
+				case typeCertificateVerify:
+					padding = hc.handshakeLen[4]
+					hc.handshakeLen[4] = 0
+				case typeFinished:
+					padding = hc.handshakeLen[5]
+					hc.handshakeLen[5] = 0
+				case typeNewSessionTicket:
+					padding = hc.handshakeLen[6]
+					hc.handshakeLen[6] = 0
+					record[5] = byte(recordTypeApplicationData)
+					record[6] = 0
 				}
-				if hasOrigPadding {
-					padding -= len(record) + c.Overhead()
-					if padding < 0 {
-						padding = 0
-					}
-				} else {
-					padding = 0
+				padding -= len(record) + c.Overhead()
+				if padding < 0 {
+					return nil, fmt.Errorf("payload[0]: %v, padding: %v", payload[0], padding)
 				}
-
-				// Add dynamic noise padding (50 - 250 bytes)
-				// Ensure total packet size (including record header) does not exceed 1350 bytes
-				maxAllowedPadding := 1350 - len(record) - c.Overhead()
-				if maxAllowedPadding > 0 {
-					randAdd := 50 + mrand.Intn(200)
-					if randAdd > maxAllowedPadding {
-						randAdd = maxAllowedPadding
-					}
-					padding += randAdd
-				}
-
-				if padding > 0 {
-					record = append(record, empty[:padding]...)
-				}
+				record = append(record, empty[:padding]...)
 			}
 			record[0] = byte(recordTypeApplicationData)
 
