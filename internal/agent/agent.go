@@ -22,6 +22,9 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/h2c"
+
 	"github.com/wangn9900/StealthForward/internal/generator"
 	"github.com/wangn9900/StealthForward/internal/models"
 
@@ -143,8 +146,8 @@ func (a *Agent) ApplyConfig(configStr string) error {
 					// 2. 强制注入 ALPN 并根据协议优化 Sniff
 					if tlsVal, ok := inbound["tls"]; ok {
 						if tls, ok := tlsVal.(map[string]interface{}); ok {
-							// 强制覆盖 ALPN 为 http/1.1，避免单机 fallback 时的 H2 协议降级断联错误
-							tls["alpn"] = []string{"http/1.1"}
+							// 支持 h2 和 http/1.1，兼容小火箭 Vision 握手要求，回落由支持 h2c 的内置服务器或 Nginx 处理
+							tls["alpn"] = []string{"h2", "http/1.1"}
 							fixed = true
 						}
 					}
@@ -705,14 +708,25 @@ func (a *Agent) EnsureMasquerade() {
 	}
 }
 
-// StartMasqueradeServer 在后台启动一个轻量级的 HTTP 服务器用于回落
+// StartMasqueradeServer 在后台启动一个轻量级的 HTTP 服务器用于回落 (支持 h2c 以兼容 HTTP/2 Fallback)
 func (a *Agent) StartMasqueradeServer(port int) {
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
-	log.Printf("Starting masquerade server on %s", addr)
+	log.Printf("Starting masquerade server on %s with h2c support", addr)
 	fs := http.FileServer(http.Dir(a.cfg.MasqueradeDir))
-	http.Handle("/", fs)
+	
+	mux := http.NewServeMux()
+	mux.Handle("/", fs)
+	
+	h2s := &http2.Server{}
+	h2cHandler := h2c.NewHandler(mux, h2s)
+	
+	server := &http.Server{
+		Addr:    addr,
+		Handler: h2cHandler,
+	}
+	
 	go func() {
-		if err := http.ListenAndServe(addr, nil); err != nil {
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Printf("Masquerade server error: %v", err)
 		}
 	}()

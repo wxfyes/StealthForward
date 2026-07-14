@@ -67,7 +67,7 @@ func GenerateEntryConfig(entry *models.EntryNode, rules []models.ForwardingRule,
 
 	// 回落配置
 	fallbackHost := "127.0.0.1"
-	fallbackPort := 80
+	fallbackPort := 8081
 	if entry.Fallback != "" {
 		if strings.Contains(entry.Fallback, ":") {
 			parts := strings.Split(entry.Fallback, ":")
@@ -243,7 +243,7 @@ func GenerateEntryConfig(entry *models.EntryNode, rules []models.ForwardingRule,
 	tlsConfig := map[string]interface{}{
 		"enabled":     true,
 		"min_version": "1.2",
-		"alpn":        []string{"http/1.1"},
+		"alpn":        []string{"h2", "http/1.1"},
 	}
 
 	if entry.RealityEnabled {
