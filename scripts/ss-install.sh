@@ -250,6 +250,34 @@ EOF
         systemctl daemon-reload
         systemctl enable stealth-ss
         systemctl restart stealth-ss
+    elif command -v rc-update &> /dev/null; then
+        if [ "$SB_TYPE" == "v2bx" ]; then
+            SB_ARGS="server -c $WRAPPER_CONF"
+        else
+            SB_ARGS="run -c $WRAPPER_CONF"
+        fi
+        rm -f /etc/init.d/stealth-ss
+        cat <<EOF > /etc/init.d/stealth-ss
+#!/sbin/openrc-run
+
+name="stealth-ss"
+description="StealthForward SS Exit Service"
+supervisor="supervise-daemon"
+
+command="$SB_BIN"
+command_args="$SB_ARGS"
+command_user="root"
+directory="/etc/stealth-ss"
+
+respawn_delay=10
+
+depend() {
+        need net
+}
+EOF
+        chmod +x /etc/init.d/stealth-ss
+        rc-update add stealth-ss default
+        rc-service stealth-ss restart || /etc/init.d/stealth-ss restart
     else
         pkill -f "$WRAPPER_CONF" || true
         nohup $START_CMD > /dev/null 2>&1 &
@@ -277,6 +305,10 @@ function uninstall_ss() {
         systemctl disable stealth-ss || true
         rm -f /etc/systemd/system/stealth-ss.service
         systemctl daemon-reload
+    elif command -v rc-update &> /dev/null; then
+        rc-service stealth-ss stop || /etc/init.d/stealth-ss stop || true
+        rc-update del stealth-ss default || true
+        rm -f /etc/init.d/stealth-ss
     else
         pkill -f "etc/stealth-ss/config.json" || true
     fi
