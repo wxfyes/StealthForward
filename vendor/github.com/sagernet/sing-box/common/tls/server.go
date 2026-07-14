@@ -94,7 +94,8 @@ func ServerHandshake(ctx context.Context, conn net.Conn, config ServerConfig) (C
 	nextProtos := config.NextProtos()
 	if len(nextProtos) > 0 {
 		negotiated := tlsConn.ConnectionState().NegotiatedProtocol
-		matched := false
+		// 允许协商结果为空（如客户端未提供 ALPN，例如 Shadowrocket 默认导入未指定 ALPN 时，确保向后兼容）
+		matched := negotiated == ""
 		for _, proto := range nextProtos {
 			if proto == negotiated {
 				matched = true
