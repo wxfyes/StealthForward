@@ -186,15 +186,23 @@ func (fm *ForwardManager) startInstance(rule models.PortForward) (*PortForwardIn
 
 	} else {
 		// Gost 直接命令行方式拉起 (默认支持 TCP + UDP 双向中转)
-		if rule.TunnelType == "none" || rule.TunnelType == "" {
+		switch rule.TunnelType {
+		case "gost_relay_tls":
+			cmd = exec.Command("/usr/local/bin/gost",
+				"-L", fmt.Sprintf("relay+tls://:%d/%s", rule.ListenPort, rule.TargetAddr),
+			)
+		case "gost_relay_ws":
+			cmd = exec.Command("/usr/local/bin/gost",
+				"-L", fmt.Sprintf("relay+ws://:%d/%s", rule.ListenPort, rule.TargetAddr),
+			)
+		case "gost_relay_wss":
+			cmd = exec.Command("/usr/local/bin/gost",
+				"-L", fmt.Sprintf("relay+wss://:%d/%s", rule.ListenPort, rule.TargetAddr),
+			)
+		default:
 			cmd = exec.Command("/usr/local/bin/gost",
 				"-L", fmt.Sprintf("tcp://:%d/%s", rule.ListenPort, rule.TargetAddr),
 				"-L", fmt.Sprintf("udp://:%d/%s", rule.ListenPort, rule.TargetAddr),
-			)
-		} else {
-			// 如果启用 gost 隧道 (此处作为预留)
-			cmd = exec.Command("/usr/local/bin/gost",
-				"-L", fmt.Sprintf("tcp://:%d/%s", rule.ListenPort, rule.TargetAddr),
 			)
 		}
 	}

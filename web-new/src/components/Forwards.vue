@@ -88,6 +88,9 @@ async function handleSubmit(isEdit = false) {
       entry_node_id: Number(form.value.entry_node_id),
       listen_port: Number(form.value.listen_port)
     }
+    if (payload.type !== 'gost') {
+      payload.tunnel_type = 'none'
+    }
 
     let url = '/api/v1/portforwards'
     if (isEdit) {
@@ -225,9 +228,18 @@ function getEntryConnectAddr(rule) {
   return `${host}:${rule.listen_port}`
 }
 
-function copyText(text) {
+function getClientCommand(rule) {
+  const addr = getEntryConnectAddr(rule)
+  if (rule.type === 'gost' && rule.tunnel_type && rule.tunnel_type !== 'none') {
+    const proto = rule.tunnel_type.replace('gost_relay_', 'relay+')
+    return `gost -L tcp://:10808 -F ${proto}://${addr}`
+  }
+  return addr
+}
+
+function copyText(text, successMsg = '中转地址已成功复制到剪贴板！') {
   navigator.clipboard.writeText(text).then(() => {
-    alert('中转地址已成功复制到剪贴板！')
+    alert(successMsg)
   }).catch(() => {
     const input = document.createElement('input')
     input.setAttribute('value', text)
@@ -235,7 +247,7 @@ function copyText(text) {
     input.select()
     document.execCommand('copy')
     document.body.removeChild(input)
-    alert('中转地址已成功复制！')
+    alert(successMsg)
   })
 }
 </script>
@@ -340,12 +352,20 @@ function copyText(text) {
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
                     </svg>
                   </button>
+                  <button v-if="rule.type === 'gost' && rule.tunnel_type && rule.tunnel_type !== 'none'" @click="copyText(getClientCommand(rule), 'Gost 客户端一键连接命令已成功复制！\n您只需在本地/国内机上直接执行该命令即可建立加密隧道连接。')" class="p-1 rounded hover:bg-amber-500/10 text-amber-500 hover:text-amber-600 dark:hover:text-amber-400 transition" title="复制 Gost 客户端一键连接命令">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    </svg>
+                  </button>
                 </div>
               </td>
               <td class="p-4 uppercase text-xs font-bold">
-                <span :class="rule.type === 'realm' ? 'text-indigo-400' : 'text-sky-400'">
+                <div :class="rule.type === 'realm' ? 'text-indigo-400' : 'text-sky-400'">
                   {{ rule.type }}
-                </span>
+                </div>
+                <div v-if="rule.type === 'gost' && rule.tunnel_type && rule.tunnel_type !== 'none'" class="text-[10px] text-amber-500 font-mono mt-0.5 normal-case">
+                  {{ rule.tunnel_type.replace('gost_relay_', 'relay+') }}
+                </div>
               </td>
               <td class="p-4 font-mono text-xs text-gray-500 dark:text-gray-400 max-w-[350px] lg:max-w-none truncate" :title="rule.target_addr">{{ rule.target_addr }}</td>
               <td class="p-4 text-right font-mono text-xs">
@@ -437,6 +457,17 @@ function copyText(text) {
                 <option value="gost" class="text-gray-800 dark:text-white bg-white dark:bg-zinc-800">Gost (双向 TCP+UDP)</option>
               </select>
             </div>
+          </div>
+
+          <!-- Tunnel Type (Visible only for Gost) -->
+          <div v-if="form.type === 'gost'">
+            <label class="block text-xs font-semibold text-gray-400 dark:text-gray-300 uppercase mb-2">传输加密隧道 (Tunnel Type)</label>
+            <select v-model="form.tunnel_type" class="glass px-4 py-2.5 rounded-2xl w-full text-sm text-gray-800 dark:text-white bg-white/20 dark:bg-black/20 focus:ring-0 outline-none border border-black/5 dark:border-white/5">
+              <option value="none" class="text-gray-800 dark:text-white bg-white dark:bg-zinc-800">无加密 (直连 TCP+UDP 裸转发)</option>
+              <option value="gost_relay_tls" class="text-gray-800 dark:text-white bg-white dark:bg-zinc-800">Gost Relay+TLS (加密隧道)</option>
+              <option value="gost_relay_ws" class="text-gray-800 dark:text-white bg-white dark:bg-zinc-800">Gost Relay+WS (WebSocket 加密)</option>
+              <option value="gost_relay_wss" class="text-gray-800 dark:text-white bg-white dark:bg-zinc-800">Gost Relay+WSS (Secure WS 加密)</option>
+            </select>
           </div>
 
           <!-- Target Remote Address -->
