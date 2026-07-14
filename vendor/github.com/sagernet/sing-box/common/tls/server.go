@@ -76,7 +76,6 @@ func ServerHandshake(ctx context.Context, conn net.Conn, config ServerConfig) (C
 	isTLS := n >= 2 && peeked[0] == 0x16 && peeked[1] == 0x03
 
 	if !isTLS {
-		println("StealthForward Debug: not TLS, peeked:", peeked[0], peeked[1], peeked[2], peeked[3], peeked[4])
 		_ = conn.Close()
 		return nil, os.ErrInvalid
 	}
@@ -104,7 +103,6 @@ func ServerHandshake(ctx context.Context, conn net.Conn, config ServerConfig) (C
 			}
 		}
 		if !matched {
-			println("StealthForward Debug: ALPN mismatch, negotiated:", negotiated, "nextProtos:", len(nextProtos))
 			_ = tlsConn.Close()
 			return nil, os.ErrInvalid
 		}

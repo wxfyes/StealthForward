@@ -378,6 +378,9 @@ func NewSTDServer(ctx context.Context, logger log.ContextLogger, options option.
 				return nil
 			}
 			negotiated := state.NegotiatedProtocol
+			if negotiated == "" {
+				return nil
+			}
 			for _, proto := range protos {
 				if proto == negotiated {
 					return nil
