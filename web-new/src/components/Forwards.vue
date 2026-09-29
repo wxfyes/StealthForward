@@ -51,6 +51,38 @@ const form = ref({
   status: 'running'
 })
 
+// 多落地目标管理 (针对 Gost 负载均衡)
+const targetList = ref([''])
+const loadBalanceStrategy = ref('round')
+
+function parseTargetAddr(addrStr) {
+  if (!addrStr) {
+    targetList.value = ['']
+    loadBalanceStrategy.value = 'round'
+    return
+  }
+  const [addrsPart, queryPart] = addrStr.split('?')
+  const addrs = addrsPart.split(',').map(s => s.trim()).filter(Boolean)
+  targetList.value = addrs.length > 0 ? addrs : ['']
+  
+  if (queryPart) {
+    const params = new URLSearchParams(queryPart)
+    loadBalanceStrategy.value = params.get('strategy') || 'round'
+  } else {
+    loadBalanceStrategy.value = 'round'
+  }
+}
+
+function addTargetNode() {
+  targetList.value.push('')
+}
+
+function removeTargetNode(index) {
+  if (targetList.value.length > 1) {
+    targetList.value.splice(index, 1)
+  }
+}
+
 function resetForm() {
   form.value = {
     id: null,
@@ -62,6 +94,8 @@ function resetForm() {
     target_addr: '',
     status: 'running'
   }
+  targetList.value = ['']
+  loadBalanceStrategy.value = 'round'
 }
 
 function openAddModal() {
@@ -71,11 +105,25 @@ function openAddModal() {
 
 function openEditModal(rule) {
   form.value = { ...rule }
+  parseTargetAddr(rule.target_addr)
   showEditModal.value = true
 }
 
 // Actions
 async function handleSubmit(isEdit = false) {
+  // 组装落地目标地址
+  const validAddrs = targetList.value.map(s => s.trim()).filter(Boolean)
+  if (validAddrs.length === 0) {
+    alert('请至少填写一个有效的落地目标地址')
+    return
+  }
+  let assembledTarget = validAddrs.join(',')
+  if (form.value.type === 'gost' && validAddrs.length > 1) {
+    const strat = loadBalanceStrategy.value || 'round'
+    assembledTarget += `?strategy=${strat}&maxFails=1&failTimeout=10s`
+  }
+  form.value.target_addr = assembledTarget
+
   if (!form.value.name || !form.value.entry_node_id || !form.value.listen_port || !form.value.target_addr) {
     alert('请填写完整规则信息')
     return
@@ -367,7 +415,12 @@ function copyText(text, successMsg = '中转地址已成功复制到剪贴板！
                   {{ rule.tunnel_type.replace('gost_relay_', 'relay+') }}
                 </div>
               </td>
-              <td class="p-4 font-mono text-xs text-gray-500 dark:text-gray-400 max-w-[350px] lg:max-w-none truncate" :title="rule.target_addr">{{ rule.target_addr }}</td>
+              <td class="p-4 font-mono text-xs text-gray-500 dark:text-gray-400 max-w-[350px] lg:max-w-none truncate" :title="rule.target_addr">
+                <span>{{ rule.target_addr ? rule.target_addr.split('?')[0] : '' }}</span>
+                <span v-if="rule.target_addr && rule.target_addr.split('?')[0].includes(',')" class="ml-1.5 px-1.5 py-0.5 rounded text-[10px] bg-sky-500/10 text-sky-400 border border-sky-500/20 font-sans">
+                  {{ rule.target_addr.split('?')[0].split(',').length }} 节点负载
+                </span>
+              </td>
               <td class="p-4 text-right font-mono text-xs">
                 <div class="text-emerald-400">↑ {{ formatBytes(rule.upload) }}</div>
                 <div class="text-indigo-400">↓ {{ formatBytes(rule.download) }}</div>
@@ -470,10 +523,41 @@ function copyText(text, successMsg = '中转地址已成功复制到剪贴板！
             </select>
           </div>
 
-          <!-- Target Remote Address -->
-          <div>
-            <label class="block text-xs font-semibold text-gray-400 dark:text-gray-300 uppercase mb-2">落地目标地址 (IP:Port / 域名:Port)</label>
-            <input v-model="form.target_addr" type="text" placeholder="例如: 203.88.117.67:443" class="glass px-4 py-2.5 rounded-2xl w-full text-sm text-gray-800 dark:text-white bg-white/20 dark:bg-black/20 focus:ring-0 outline-none border border-black/5 dark:border-white/5 font-mono" />
+          <!-- Target Remote Address (支持多节点负载均衡录入) -->
+          <div class="space-y-3">
+            <div class="flex justify-between items-center">
+              <label class="block text-xs font-semibold text-gray-400 dark:text-gray-300 uppercase">
+                落地目标地址 (IP:Port / 域名:Port)
+              </label>
+              <button v-if="form.type === 'gost'" type="button" @click="addTargetNode" class="text-xs text-primary-400 hover:text-primary-300 font-medium flex items-center gap-1 transition">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                </svg>
+                添加负载节点
+              </button>
+            </div>
+
+            <div v-for="(addr, idx) in targetList" :key="idx" class="flex items-center gap-2">
+              <span v-if="targetList.length > 1" class="text-xs font-mono text-gray-400 shrink-0 w-6">#{{ idx + 1 }}</span>
+              <input v-model="targetList[idx]" type="text" :placeholder="idx === 0 ? '例如: 203.88.117.67:443' : '备用/负载节点地址 例如: 203.88.117.68:443'" class="glass px-4 py-2.5 rounded-2xl w-full text-sm text-gray-800 dark:text-white bg-white/20 dark:bg-black/20 focus:ring-0 outline-none border border-black/5 dark:border-white/5 font-mono" />
+              <button v-if="targetList.length > 1" type="button" @click="removeTargetNode(idx)" class="p-2 rounded-xl text-rose-400 hover:bg-rose-500/10 transition shrink-0" title="删除此节点">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <!-- 负载均衡策略选择 (仅 Gost 且多个目标时显示) -->
+            <div v-if="form.type === 'gost' && targetList.length > 1" class="p-3.5 rounded-2xl bg-black/5 dark:bg-black/20 border border-black/5 dark:border-white/5 space-y-2">
+              <label class="block text-xs font-semibold text-gray-400 dark:text-gray-300">多节点负载调度策略</label>
+              <select v-model="loadBalanceStrategy" class="glass px-3 py-2 rounded-xl w-full text-xs text-gray-800 dark:text-white bg-white/20 dark:bg-black/20 focus:ring-0 outline-none border border-black/5 dark:border-white/5">
+                <option value="round" class="text-gray-800 dark:text-white bg-white dark:bg-zinc-800">轮询负载 (Round-Robin) - 各落地机均衡分配连接</option>
+                <option value="fifo" class="text-gray-800 dark:text-white bg-white dark:bg-zinc-800">主备容灾 (Failover / FIFO) - 优先机器1，宕机自动切备机</option>
+                <option value="hash" class="text-gray-800 dark:text-white bg-white dark:bg-zinc-800">源 IP 哈希 (Client Hash) - 同一客户端始终连同一机器</option>
+              </select>
+              <p class="text-[0.7rem] text-primary-400 font-medium">★ 已自动开启 gost 故障健康探测（maxFails=1, failTimeout=10s），异常节点将自动从池中剔除并切流。</p>
+            </div>
+
             <p class="text-[0.7rem] text-primary-500 dark:text-primary-400 mt-1.5 font-medium">★ 注意：转发为四层透明转发，请保证目的端口的真实性</p>
           </div>
         </div>
@@ -513,9 +597,9 @@ function copyText(text, successMsg = '中转地址已成功复制到剪贴板！
                 <div class="text-xs font-bold text-gray-600 dark:text-gray-400 mb-1">诊断结果详情</div>
                 <div v-if="diagnosing" class="animate-pulse text-primary-500">正在诊断联通性，请稍候...</div>
                 <div v-else-if="diagnoseResult">
-                  <div>目标地址数: 1/1</div>
+                  <div>目标落地数: {{ diagnoseResult.outbounds ? diagnoseResult.outbounds.length : 1 }} 台机器</div>
                   <div :class="diagnoseResult.inbound_ok ? 'text-emerald-500 dark:text-emerald-400' : 'text-rose-500 dark:text-rose-400'">
-                    [0] {{ diagnoseResult.inbound_ok ? `用时 ${diagnoseResult.inbound_ms} ms` : '连接超时' }} 地址: {{ diagnoseResult.inbound_addr }}
+                    [0] {{ diagnoseResult.inbound_ok ? `用时 ${diagnoseResult.inbound_ms} ms` : '连接超时' }} 入口: {{ diagnoseResult.inbound_addr }}
                   </div>
                 </div>
               </div>
@@ -525,15 +609,23 @@ function copyText(text, successMsg = '中转地址已成功复制到剪贴板！
           <!-- Outbounds Diagnose -->
           <div>
             <div class="text-sm font-bold text-gray-800 dark:text-white mb-2">出口诊断 (Outbounds)</div>
-            <div class="text-xs text-gray-500 dark:text-gray-400 bg-white/50 dark:bg-zinc-800/50 p-4 rounded-xl border border-black/5 dark:border-white/5 font-mono">
+            <div class="text-xs text-gray-500 dark:text-gray-400 bg-white/50 dark:bg-zinc-800/50 p-4 rounded-xl border border-black/5 dark:border-white/5 font-mono max-h-48 overflow-y-auto space-y-1.5">
               <div v-if="diagnosing" class="animate-pulse">正在检测落地端联通性...</div>
               <div v-else-if="diagnoseResult">
-                <div v-if="diagnoseResult.outbound_ok" class="text-emerald-500 dark:text-emerald-400">
-                  [0] 用时 {{ diagnoseResult.outbound_ms }} ms 地址: {{ diagnoseResult.outbound_addr }} (通畅)
-                </div>
-                <div v-else class="text-rose-500 dark:text-rose-400">
-                  [0] 连接超时，地址: {{ diagnoseResult.outbound_addr }} (不可达)
-                </div>
+                <template v-if="diagnoseResult.outbounds && diagnoseResult.outbounds.length > 0">
+                  <div v-for="(out, idx) in diagnoseResult.outbounds" :key="idx"
+                    :class="out.ok ? 'text-emerald-500 dark:text-emerald-400' : 'text-rose-500 dark:text-rose-400'">
+                    [{{ idx }}] {{ out.ok ? `用时 ${out.ms} ms` : '连接超时' }} 地址: {{ out.addr }} ({{ out.ok ? '通畅' : '不可达' }})
+                  </div>
+                </template>
+                <template v-else>
+                  <div v-if="diagnoseResult.outbound_ok" class="text-emerald-500 dark:text-emerald-400">
+                    [0] 用时 {{ diagnoseResult.outbound_ms }} ms 地址: {{ diagnoseResult.outbound_addr }} (通畅)
+                  </div>
+                  <div v-else class="text-rose-500 dark:text-rose-400">
+                    [0] 连接超时，地址: {{ diagnoseResult.outbound_addr }} (不可达)
+                  </div>
+                </template>
               </div>
             </div>
           </div>
@@ -542,9 +634,9 @@ function copyText(text, successMsg = '中转地址已成功复制到剪贴板！
           <div>
             <div class="text-sm font-bold text-gray-800 dark:text-white mb-2">面板反馈 (Backend)</div>
             <div class="text-xs text-gray-500 dark:text-gray-400 bg-white/50 dark:bg-zinc-800/50 p-4 rounded-xl border border-black/5 dark:border-white/5 font-mono space-y-1">
-              <div>发出任务 1</div>
-              <div>发出失败 {{ diagnoseResult && !diagnoseResult.inbound_ok ? 1 : 0 }}</div>
-              <div>回收任务 1</div>
+              <div>发出任务 {{ diagnoseResult?.backend_tasks || 1 }}</div>
+              <div>发出失败 {{ diagnoseResult ? (diagnoseResult.backend_failed || 0) + (!diagnoseResult.inbound_ok ? 1 : 0) : 0 }}</div>
+              <div>回收任务 {{ diagnoseResult?.backend_tasks || 1 }}</div>
             </div>
           </div>
         </div>

@@ -175,7 +175,7 @@ async function fetchSettings() {
       
       <!-- 底部版本 -->
       <div class="px-2 text-[var(--text-muted)] text-xs font-mono">
-        Version v3.9.6
+        Version v3.9.23
       </div>
     </aside>
 

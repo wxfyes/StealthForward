@@ -90,7 +90,7 @@ async function handleLogin() {
       
       <!-- Footer -->
       <p class="text-center text-xs text-[var(--text-muted)]/50">
-        StealthForward v3.6.0 · Commercial License System
+        StealthForward v3.9.23 · Commercial License System
       </p>
     </div>
   </div>

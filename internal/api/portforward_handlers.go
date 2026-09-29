@@ -4,6 +4,8 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -251,16 +253,64 @@ func DiagnosePortForwardHandler(c *gin.Context) {
 		conn1.Close()
 	}
 
-	// 3. 诊断 Outbound (测试中控到落地目标地址的联通性)
-	outboundOK := false
-	var outboundMs int64 = 0
+	// 3. 诊断 Outbound (支持单机或多机负载的目标地址清洗与并发探测)
+	cleanTarget := strings.Split(rule.TargetAddr, "?")[0]
+	rawAddrs := strings.Split(cleanTarget, ",")
+	var targetAddrs []string
+	for _, addr := range rawAddrs {
+		trimmed := strings.TrimSpace(addr)
+		if trimmed != "" {
+			targetAddrs = append(targetAddrs, trimmed)
+		}
+	}
+	if len(targetAddrs) == 0 && rule.TargetAddr != "" {
+		targetAddrs = append(targetAddrs, rule.TargetAddr)
+	}
 
-	t2 := time.Now()
-	conn2, err2 := net.DialTimeout("tcp", rule.TargetAddr, 2*time.Second)
-	if err2 == nil {
-		outboundOK = true
-		outboundMs = time.Since(t2).Milliseconds()
-		conn2.Close()
+	type OutboundItem struct {
+		Addr string `json:"addr"`
+		OK   bool   `json:"ok"`
+		Ms   int64  `json:"ms"`
+	}
+
+	outbounds := make([]OutboundItem, len(targetAddrs))
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	failedCount := 0
+
+	for i, addr := range targetAddrs {
+		wg.Add(1)
+		go func(idx int, target string) {
+			defer wg.Done()
+			t := time.Now()
+			conn, err := net.DialTimeout("tcp", target, 2*time.Second)
+			item := OutboundItem{
+				Addr: target,
+				OK:   false,
+				Ms:   0,
+			}
+			if err == nil {
+				item.OK = true
+				item.Ms = time.Since(t).Milliseconds()
+				conn.Close()
+			}
+			mu.Lock()
+			outbounds[idx] = item
+			if !item.OK {
+				failedCount++
+			}
+			mu.Unlock()
+		}(i, addr)
+	}
+	wg.Wait()
+
+	firstOK := false
+	var firstMs int64 = 0
+	firstAddr := rule.TargetAddr
+	if len(outbounds) > 0 {
+		firstOK = outbounds[0].OK
+		firstMs = outbounds[0].Ms
+		firstAddr = outbounds[0].Addr
 	}
 
 	// 返回诊断详情的 JSON 供前端弹窗展示
@@ -271,10 +321,11 @@ func DiagnosePortForwardHandler(c *gin.Context) {
 		"inbound_addr":   inboundAddr,
 		"inbound_ok":     inboundOK,
 		"inbound_ms":     inboundMs,
-		"outbound_addr":  rule.TargetAddr,
-		"outbound_ok":    outboundOK,
-		"outbound_ms":    outboundMs,
-		"backend_tasks":  1,
-		"backend_failed": 0,
+		"outbound_addr":  firstAddr,
+		"outbound_ok":    firstOK,
+		"outbound_ms":    firstMs,
+		"outbounds":      outbounds,
+		"backend_tasks":  len(outbounds),
+		"backend_failed": failedCount,
 	})
 }
