@@ -36,6 +36,10 @@ type Config struct {
 	MonitorWebhook         string `json:"monitor_webhook"`
 	MonitorIntervalSec     int    `json:"monitor_interval_sec"`
 	MonitorProxy           string `json:"monitor_proxy"` // 新增：TG报警代理 URL
+	ExternalCheckEnabled   bool   `json:"external_check_enabled"`   // 新增：是否启用外部第三方多地测活二次确认
+	ExternalCheckURL       string `json:"external_check_url"`       // 新增：外部测活接口模版（支持 {ip} 和 {port} 变量）
+	ExternalCheckKeyword   string `json:"external_check_keyword"`   // 新增：外部测活判断存活的成功关键字
+	ExternalCheckTimeout   int    `json:"external_check_timeout"`   // 新增：外部测活请求超时时间（秒）
 }
 
 // LogEntry 日志条目
@@ -68,6 +72,7 @@ var (
 	lastChangedIP        string // 新增：最后一次更换成功的新 IP
 	lastFailedChangeTime time.Time // 新增：最后一次更换全部失败的时间
 	activeIP             string // 新增：当前已确认存活最新的公网 IP，防止 DNS 缓存抖动误判
+	discardedIP          string // 新增：记录被废弃替换的旧 IP，防止 DNS 缓存未刷新导致误拿旧 IP 测活
 
 	monitorStatuses      []MonitorStatus
 	monitorStatusesMutex sync.RWMutex
@@ -117,14 +122,18 @@ func loadConfig() {
 
 	// 默认配置
 	config = Config{
-		HinetDomain:          "hinet.example.com",
-		HinetPort:            443,
-		ChangeIPURL:          "https://newip.lala.gg/hinetapi.php?type=change&lanip=10.92.2.14",
-		CheckIntervalSeconds: 60,
-		AutoChangeEnabled:    true,
-		ListenAddr:           ":18080",
-		CheckPort:            80, // 默认使用 80 端口自检
+		HinetDomain:            "hinet.example.com",
+		HinetPort:              443,
+		ChangeIPURL:            "https://newip.lala.gg/hinetapi.php?type=change&lanip=10.92.2.14",
+		CheckIntervalSeconds:   60,
+		AutoChangeEnabled:      true,
+		ListenAddr:             ":18080",
+		CheckPort:              80, // 默认使用 80 端口自检
 		WaitSecondsAfterChange: 90, // 默认换IP后等待 90 秒
+		ExternalCheckEnabled:   true,
+		ExternalCheckURL:       "https://v2.xxapi.cn/api/tcping?address={ip}&port={port}",
+		ExternalCheckKeyword:   "ping",
+		ExternalCheckTimeout:   8,
 	}
 
 	data, err := os.ReadFile(configFile)
@@ -136,6 +145,14 @@ func loadConfig() {
 
 	if config.WaitSecondsAfterChange <= 0 {
 		config.WaitSecondsAfterChange = 90
+	}
+	if config.ExternalCheckTimeout <= 0 {
+		config.ExternalCheckTimeout = 8
+	}
+	if config.ExternalCheckURL == "" || strings.Contains(config.ExternalCheckURL, "pearktrue") {
+		// 自动平滑升级为稳定可用的国内官方开放测活接口
+		config.ExternalCheckURL = "https://v2.xxapi.cn/api/tcping?address={ip}&port={port}"
+		config.ExternalCheckKeyword = "ping"
 	}
 }
 
@@ -149,6 +166,94 @@ func saveConfig(newCfg Config) {
 	defer configMutex.Unlock()
 	config = newCfg
 	saveConfigNoLock()
+}
+
+// checkLocalInternetAlive 检测本机自身是否能正常访问国内互联网（排除本地断网导致的误切）
+func checkLocalInternetAlive() bool {
+	// 尝试向国内主流公共 DNS 的 53 端口发起快速 TCP 连接
+	dnsServers := []string{"223.5.5.5:53", "119.29.29.29:53"}
+	for _, srv := range dnsServers {
+		conn, err := net.DialTimeout("tcp", srv, 2*time.Second)
+		if err == nil {
+			conn.Close()
+			return true
+		}
+	}
+	return false
+}
+
+// 外部探针返回结果三态枚举
+const (
+	ExtResultAlive = 1 // 目标存活（外部探针明确测试通过）
+	ExtResultDead  = 2 // 目标不可达（外部探针正常运行，且明确检测到目标端口不通）
+	ExtResultError = 3 // 探针自身故障（接口网络不通、DNS 解析失败、HTTP 5xx、超时等）
+)
+
+// checkExternalLiveness 通过外部第三方/多地接口复核目标 IP 与端口的连通性（方案 C）
+func checkExternalLiveness(targetIP string, port int) (int, string) {
+	configMutex.RLock()
+	rawURL := config.ExternalCheckURL
+	keyword := strings.TrimSpace(config.ExternalCheckKeyword)
+	timeoutSec := config.ExternalCheckTimeout
+	configMutex.RUnlock()
+
+	if timeoutSec <= 0 {
+		timeoutSec = 8
+	}
+	if rawURL == "" {
+		return ExtResultError, "未配置外部测活 API URL"
+	}
+
+	// 动态替换变量
+	apiURL := strings.ReplaceAll(rawURL, "{ip}", targetIP)
+	apiURL = strings.ReplaceAll(apiURL, "{port}", strconv.Itoa(port))
+
+	client := &http.Client{
+		Timeout: time.Duration(timeoutSec) * time.Second,
+	}
+
+	req, err := http.NewRequest("GET", apiURL, nil)
+	if err != nil {
+		return ExtResultError, fmt.Sprintf("构造请求失败: %v", err)
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) HinetMonitor/2.0")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		// 铁律：探针自身网络错误或 DNS 失败，绝不能当成目标被封！
+		return ExtResultError, fmt.Sprintf("调用外部接口失败或网络异常: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
+		return ExtResultError, fmt.Sprintf("外部探针返回异常状态码 %d", resp.StatusCode)
+	}
+
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 32*1024))
+	if err != nil {
+		return ExtResultError, fmt.Sprintf("读取外部接口响应失败: %v", err)
+	}
+	bodyStr := string(bodyBytes)
+
+	// 如果指定了关键字，严格匹配关键字
+	if keyword != "" {
+		if strings.Contains(strings.ToLower(bodyStr), strings.ToLower(keyword)) {
+			return ExtResultAlive, fmt.Sprintf("成功匹配到关键字 [%s]", keyword)
+		}
+		brief := strings.ReplaceAll(strings.ReplaceAll(bodyStr, "\r", ""), "\n", " ")
+		if len(brief) > 80 {
+			brief = brief[:80] + "..."
+		}
+		return ExtResultDead, fmt.Sprintf("外部探针未检测到关键字 [%s] (返回: %s)", keyword, brief)
+	}
+
+	// 若未指定关键字，判断是否包含显式错误词
+	lower := strings.ToLower(bodyStr)
+	if strings.Contains(lower, "closed") || strings.Contains(lower, "failed") || strings.Contains(lower, "error") || strings.Contains(lower, "timeout") || strings.Contains(lower, "连接失败") {
+		return ExtResultDead, fmt.Sprintf("外部探针反馈连接失败: %s", bodyStr)
+	}
+
+	return ExtResultAlive, fmt.Sprintf("HTTP %d 接口成功响应", resp.StatusCode)
 }
 
 func triggerChangeIP() bool {
@@ -174,6 +279,17 @@ func triggerChangeIP() bool {
 	}
 	probeDomain := domains[0]
 
+	zoneIDToUse := cfZoneID
+	if cfToken != "" {
+		zones := fetchCloudflareZones(cfToken)
+		for _, z := range zones {
+			if strings.HasSuffix(probeDomain, z.Name) {
+				zoneIDToUse = z.ID
+				break
+			}
+		}
+	}
+
 	// 1. 获取当前域名的公网 IP 作为 oldIP
 	var oldIP string
 	ips, err := lookupIPDirectly(probeDomain)
@@ -193,21 +309,24 @@ func triggerChangeIP() bool {
 
 		// 2. 调用 API 触发更换
 		isNewAPI := strings.Contains(changeURL, "hinetapi.php") || strings.Contains(changeURL, "type=change")
+		var apiReturnedIP string
 		if isNewAPI {
 			addLog("info", "检测到新版 Hinet API，使用 GET 请求触发更换 IP...")
 			resp, err := http.Get(changeURL)
 			if err != nil {
 				addLog("error", fmt.Sprintf("调用新版换 IP 接口失败: %v", err))
 				sameIPCount++
-				if sameIPCount >= 3 {
-					addLog("error", "连续 3 次调用接口失败或 IP 未发生变化，触发安全冷却")
+				if sameIPCount >= maxTries {
+					addLog("error", fmt.Sprintf("连续 %d 次调用接口失败或 IP 未发生变化，触发安全冷却", maxTries))
 					return false
 				}
 				addLog("info", "等待 30 秒后重试...")
 				time.Sleep(30 * time.Second)
 				continue
 			}
+			bodyBytes, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
+			apiReturnedIP = extractIPFromHTML(string(bodyBytes))
 		} else {
 			resp, err := http.PostForm(changeURL, url.Values{"change_ip": {}})
 			if err != nil {
@@ -221,57 +340,91 @@ func triggerChangeIP() bool {
 				time.Sleep(30 * time.Second)
 				continue
 			}
+			bodyBytes, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
+			apiReturnedIP = extractIPFromHTML(string(bodyBytes))
 		}
 
-		// 3. 等待并轮询获取真正的新 IP
-		addLog("warning", fmt.Sprintf("已发送 IP 更换指令，开始轮询等待新 IP 分配并同步 (最长等待 %d 秒)...", waitSec))
+		// 3. 混合测活：优先拿 API 的结果进行尝试，同时监听 CF 变化
+		addLog("warning", fmt.Sprintf("已发送 IP 更换指令，开始混合轮询测活 (最长等待 %d 秒)...", waitSec))
+
+		if apiReturnedIP != "" && apiReturnedIP != currentAttemptOldIP {
+			addLog("info", fmt.Sprintf("商家 API 第一时间返回了新 IP: %s，我们将尝试对它测活，同时监听远端 DDNS...", apiReturnedIP))
+		}
 
 		newIP := ""
+		isSuccess := false
 		startTime := time.Now()
+		checkAttempt := 0
+		lastCfCheck := time.Now().Add(-10 * time.Second) // 确保第一次立即检查
 
-		// 构造一个查询 status 的 URL，解析 changeURL 动态生成同 host 下的 /214higl.php 接口，安全查看当前 IP
-		statusURL := "https://newip.lala.gg/214higl.php"
-		u, err := url.Parse(changeURL)
-		if err == nil {
-			statusURL = fmt.Sprintf("%s://%s/214higl.php", u.Scheme, u.Host)
-		}
+		for time.Since(startTime) < time.Duration(waitSec)*time.Second {
+			checkAttempt++
+			targetIP := ""
 
-		for {
-			// A. 尝试通过 DNS 解析获取 IP (若 VPS 上运行了 DDNS 脚本，域名解析会更新)
-			dnsIPs, err := lookupIPDirectly(probeDomain)
-			if err == nil && len(dnsIPs) > 0 {
-				resolvedIP := dnsIPs[0]
-				if resolvedIP != currentAttemptOldIP && resolvedIP != "" {
+			// 优先检查 CF 是否有更新（每 5 秒查一次即可，不用每次循环都查）
+			if time.Since(lastCfCheck) >= 5*time.Second {
+				lastCfCheck = time.Now()
+				var resolvedIP string
+				if cfToken != "" && zoneIDToUse != "" {
+					resolvedIP = getCloudflareDDNS(cfToken, zoneIDToUse, probeDomain)
+				} else {
+					dnsIPs, err := lookupIPDirectly(probeDomain)
+					if err == nil && len(dnsIPs) > 0 {
+						for _, rIP := range dnsIPs {
+							if rIP != currentAttemptOldIP && rIP != "" {
+								resolvedIP = rIP
+								break
+							}
+						}
+					}
+				}
+				
+				if resolvedIP != "" && resolvedIP != currentAttemptOldIP {
+					// CF/DNS 上出现了新 IP，这是最真实的，覆盖掉 API 返回的 IP！
+					if newIP != resolvedIP {
+						addLog("success", fmt.Sprintf("检测到 Cloudflare (或 DNS) 已被更新，获取到绝对真实新 IP: %s，立即转向测活该 IP！", resolvedIP))
+					}
 					newIP = resolvedIP
-					addLog("success", fmt.Sprintf("检测到 DNS 已同步更新，获取到新 IP: %s", newIP))
-					break
 				}
 			}
 
-			// B. 尝试通过商家 API 查询获取 IP (只在 statusURL 不含 type=change 时请求，防止重复触发)
-			if !strings.Contains(statusURL, "type=change") {
-				merchantIP := fetchNewIPFromMerchant(statusURL)
-				if merchantIP != "" && merchantIP != currentAttemptOldIP {
-					newIP = merchantIP
-					addLog("success", fmt.Sprintf("检测到商家接口返回新 IP: %s", newIP))
-					break
-				}
+			if newIP != "" {
+				targetIP = newIP // CF 给了新 IP，最高优先级
+			} else if apiReturnedIP != "" && apiReturnedIP != currentAttemptOldIP {
+				targetIP = apiReturnedIP // CF 还没更新，先拿 API 返回的 IP 垫背试试
 			}
 
-			// 检查是否超时
-			if time.Since(startTime) > time.Duration(waitSec)*time.Second {
-				break
+			if targetIP != "" {
+				address := net.JoinHostPort(targetIP, strconv.Itoa(port))
+				conn, err := net.DialTimeout("tcp", address, 3*time.Second)
+				if err == nil {
+					conn.Close()
+					isSuccess = true
+					newIP = targetIP
+					break // 只要有一个能通，直接起飞！
+				}
+				if checkAttempt%3 == 1 { // 避免日志刷屏，每隔几次输出一次
+					sourceLabel := "API 预分配"
+					if targetIP == newIP {
+						sourceLabel = "CF 权威"
+					}
+					addLog("warning", fmt.Sprintf("目标 IP [%s] %s TCP 探测等待上线中 (第 %d 次尝试): %v", sourceLabel, targetIP, checkAttempt, err))
+				}
+			} else {
+				if checkAttempt%3 == 1 {
+					addLog("warning", fmt.Sprintf("暂无新 IP 可测 (等待远端拨号响应中)，等待中 (第 %d 次尝试)...", checkAttempt))
+				}
 			}
-			time.Sleep(5 * time.Second)
+			time.Sleep(3 * time.Second)
 		}
 
-		// 4. 判断获取到的 IP 是否有效且发生了改变
-		if newIP == "" || newIP == currentAttemptOldIP {
-			addLog("error", "未能获取到新的公网 IP (IP 未发生变化或获取超时)。")
+		if !isSuccess {
+			// 4. TCP 探测失败（超时）
+			addLog("error", "在规定的时间内未能检测到有效的存活新 IP，判定拨号系统异常或被墙。")
 			sameIPCount++
-			if sameIPCount >= 3 {
-				addLog("error", "连续 3 次更换 IP 后公网 IP 未发生变化，判定拨号系统异常，进入安全冷却期。")
+			if sameIPCount >= maxTries {
+				addLog("error", fmt.Sprintf("连续 %d 次更换 IP 后均未测通，触发安全冷却期。", maxTries))
 				return false
 			}
 			addLog("info", "等待 10 秒后进行下一次更换尝试...")
@@ -283,66 +436,19 @@ func triggerChangeIP() bool {
 		sameIPCount = 0
 		oldIP = newIP // 更新 oldIP 为当前最新获得的 IP，以便下一次尝试对比
 
-		addLog("info", fmt.Sprintf("开始对新公网 IP %s 进行 TCP 可用性自检...", newIP))
-
-		// 5. 对新 IP 进行 3 次快速 TCP 探测
-		address := net.JoinHostPort(newIP, strconv.Itoa(port))
-		isSuccess := false
-		for checkAttempt := 1; checkAttempt <= 3; checkAttempt++ {
-			conn, err := net.DialTimeout("tcp", address, 5*time.Second)
-			if err == nil {
-				conn.Close()
-				isSuccess = true
-				break
-			}
-			addLog("warning", fmt.Sprintf("新 IP %s 第 %d/3 次 TCP 探测失败 (端口 %d 不通): %v", newIP, checkAttempt, port, err))
-			if checkAttempt < 3 {
-				time.Sleep(2 * time.Second)
-			}
-		}
-
 		if isSuccess {
-			addLog("success", fmt.Sprintf("TCP 自检通过！新 IP %s 确认可用，开始同步到 Cloudflare...", newIP))
+			addLog("success", fmt.Sprintf("TCP 自检通过！新 IP %s 确认可用上线！", newIP))
 
 			configMutex.Lock()
+			if currentAttemptOldIP != "" && currentAttemptOldIP != newIP {
+				discardedIP = currentAttemptOldIP // 记录被淘汰废弃的旧 IP，防止后续从 DNS 查出旧 IP 误测
+				addLog("info", fmt.Sprintf("已将旧 IP %s 记录为已废弃旧 IP，在域名记录生效前将自动忽略此旧 IP", discardedIP))
+			}
 			statusIP = newIP      // 提前更新状态 IP
 			lastChangedIP = newIP // 记录期望的新 IP
 			activeIP = newIP      // 更新当前确保存活的最新的公网 IP
 			configMutex.Unlock()
 
-			// 同步 Cloudflare DDNS (如果配置了)
-			if cfToken != "" {
-				domainsList := parseDomainsList(domainStr)
-				addLog("info", fmt.Sprintf("正在同步新 IP %s 到 Cloudflare (共有 %d 个域名)...", newIP, len(domainsList)))
-				zones := fetchCloudflareZones(cfToken)
-				successCount := 0
-				for _, d := range domainsList {
-					zoneIDToUse := cfZoneID
-					for _, z := range zones {
-						if strings.HasSuffix(d, z.Name) {
-							zoneIDToUse = z.ID
-							break
-						}
-					}
-					if zoneIDToUse == "" {
-						addLog("error", fmt.Sprintf("无法找到域名 %s 对应的 Zone ID，跳过更新", d))
-						continue
-					}
-					if updateCloudflareDDNS(cfToken, zoneIDToUse, d, newIP) {
-						addLog("success", fmt.Sprintf("Cloudflare DNS 同步更新成功！域名 %s 已指向新 IP: %s", d, newIP))
-						successCount++
-					} else {
-						addLog("error", fmt.Sprintf("域名 %s 同步更新失败", d))
-					}
-				}
-				if successCount == len(domainsList) {
-					addLog("success", "所有绑定的域名 DNS 解析均已成功同步更新。")
-				} else {
-					addLog("warning", fmt.Sprintf("域名同步更新完成：成功 %d 个，失败 %d 个", successCount, len(domainsList)-successCount))
-				}
-			} else {
-				addLog("info", "未配置 Cloudflare API 参数，跳过 DNS 自动更新。")
-			}
 			return true
 		}
 
@@ -357,22 +463,7 @@ func triggerChangeIP() bool {
 			lastChangedIP = newIP
 			configMutex.Unlock()
 
-			if cfToken != "" {
-				domains := parseDomainsList(domainStr)
-				zones := fetchCloudflareZones(cfToken)
-				for _, d := range domains {
-					zoneIDToUse := cfZoneID
-					for _, z := range zones {
-						if strings.HasSuffix(d, z.Name) {
-							zoneIDToUse = z.ID
-							break
-						}
-					}
-					if zoneIDToUse != "" {
-						updateCloudflareDDNS(cfToken, zoneIDToUse, d, newIP)
-					}
-				}
-			}
+			// （已移除强制同步 IP 以便 SSH 排查的代码，一切以远端 DDNS 为准）
 			return false
 		}
 		// 判定被墙后，立即发起下一轮 IP 更换，只等待 5 秒防 API 频控！
@@ -383,32 +474,7 @@ func triggerChangeIP() bool {
 	return true
 }
 
-// 从商家页面抓取并解析新公网 IP
-func fetchNewIPFromMerchant(urlStr string) string {
-	resp, err := http.Get(urlStr)
-	if err != nil {
-		return ""
-	}
-	defer resp.Body.Close()
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return ""
-	}
-	return extractIPFromHTML(string(bodyBytes))
-}
-
-// 正则提取合法公网 IP
-func extractIPFromHTML(body string) string {
-	re := regexp.MustCompile(`\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b`)
-	matches := re.FindAllString(body, -1)
-	for _, match := range matches {
-		ip := net.ParseIP(match)
-		if ip != nil && !ip.IsLoopback() && !ip.IsPrivate() && !ip.IsUnspecified() {
-			return match
-		}
-	}
-	return ""
-}
+// (已废弃提取商家 IP 的逻辑，改为直接通过 CF 权威记录或 DNS 获取)
 
 type CFDnsRecord struct {
 	ID      string `json:"id"`
@@ -471,14 +537,26 @@ func parseDomainsList(domainStr string) []string {
 	return res
 }
 
-// 更新 Cloudflare DDNS 记录
-func updateCloudflareDDNS(token, zoneID, domain, ip string) bool {
-	// 1. 获取 DNS 记录 ID
-	listURL := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/dns_records?name=%s", zoneID, domain)
+// (已删除 updateCloudflareDDNS，交由远端脚本处理)
+
+// 正则提取合法公网 IP
+func extractIPFromHTML(body string) string {
+	re := regexp.MustCompile(`\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b`)
+	matches := re.FindAllString(body, -1)
+	for _, match := range matches {
+		ip := net.ParseIP(match)
+		if ip != nil && !ip.IsLoopback() && !ip.IsPrivate() && !ip.IsUnspecified() {
+			return match
+		}
+	}
+	return ""
+}
+
+func getCloudflareDDNS(token, zoneID, domain string) string {
+	listURL := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/dns_records?name=%s&type=A", zoneID, domain)
 	req, err := http.NewRequest("GET", listURL, nil)
 	if err != nil {
-		log.Printf("创建 CF 请求失败: %v", err)
-		return false
+		return ""
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
@@ -486,54 +564,16 @@ func updateCloudflareDDNS(token, zoneID, domain, ip string) bool {
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Printf("请求 CF 获取记录失败: %v", err)
-		return false
+		return ""
 	}
 	defer resp.Body.Close()
 
 	var listResp CFDnsListResponse
 	if err := json.NewDecoder(resp.Body).Decode(&listResp); err != nil || !listResp.Success || len(listResp.Result) == 0 {
-		log.Printf("解析 CF 记录列表失败: %v, success=%t, len=%d", err, listResp.Success, len(listResp.Result))
-		return false
+		return ""
 	}
 
-	recordID := listResp.Result[0].ID
-
-	// 2. 更新 A 记录
-	updateURL := fmt.Sprintf("https://api.cloudflare.com/client/v4/zones/%s/dns_records/%s", zoneID, recordID)
-	payload := map[string]interface{}{
-		"type":    "A",
-		"name":    domain,
-		"content": ip,
-		"ttl":     60,
-		"proxied": false,
-	}
-	payloadBytes, _ := json.Marshal(payload)
-
-	req, err = http.NewRequest("PUT", updateURL, strings.NewReader(string(payloadBytes)))
-	if err != nil {
-		log.Printf("创建 CF 更新请求失败: %v", err)
-		return false
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err = client.Do(req)
-	if err != nil {
-		log.Printf("请求 CF 更新记录失败: %v", err)
-		return false
-	}
-	defer resp.Body.Close()
-
-	var updateResp struct {
-		Success bool `json:"success"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&updateResp); err != nil {
-		log.Printf("解析 CF 更新响应失败: %v", err)
-		return false
-	}
-
-	return updateResp.Success
+	return listResp.Result[0].Content
 }
 
 func lookupIPDirectlyInternal(domain string) ([]string, error) {
@@ -621,60 +661,106 @@ func probeLoop() {
 		}
 		probeDomain := domains[0]
 
-		// 1. 解析域名获取当前 IP（绕过本地缓存直接查询公共 DNS）
-		ips, err := lookupIPDirectly(probeDomain)
-		if err != nil {
-			statusState = "error"
-			addLog("error", fmt.Sprintf("域名 %s 解析失败: %v", probeDomain, err))
-			time.Sleep(time.Duration(interval) * time.Second)
-			continue
+		configMutex.RLock()
+		cfToken := config.CFToken
+		cfZoneID := config.CFZoneID
+		configMutex.RUnlock()
+
+		zoneIDToUse := cfZoneID
+		if cfToken != "" {
+			zones := fetchCloudflareZones(cfToken)
+			for _, z := range zones {
+				if strings.HasSuffix(probeDomain, z.Name) {
+					zoneIDToUse = z.ID
+					break
+				}
+			}
 		}
 
-		currentIP := ips[0]
-		statusIP = currentIP
+		// 1. 获取权威 IP：优先查询 CF 权威记录，否则使用公共 DNS 查询
+		var currentIP string
+		cfIP := ""
+		if cfToken != "" && zoneIDToUse != "" {
+			cfIP = getCloudflareDDNS(cfToken, zoneIDToUse, probeDomain)
+		}
+
+		if cfIP != "" {
+			currentIP = cfIP
+		} else {
+			ips, err := lookupIPDirectly(probeDomain)
+			if err != nil {
+				statusState = "error"
+				addLog("error", fmt.Sprintf("域名 %s 解析失败: %v", probeDomain, err))
+				time.Sleep(time.Duration(interval) * time.Second)
+				continue
+			}
+			currentIP = ips[0]
+		}
 
 		configMutex.Lock()
 		if activeIP == "" {
 			activeIP = currentIP
 		}
+		actIP := activeIP
+		discIP := discardedIP
+		expectedIP := lastChangedIP
 		configMutex.Unlock()
 
 		// 检查 DNS 解析是否已和我们记录的最新 IP 同步
-		configMutex.RLock()
-		expectedIP := lastChangedIP
-		configMutex.RUnlock()
-
-		if expectedIP != "" && currentIP != expectedIP {
-			dnsSyncAttempts++
-			if dnsSyncAttempts < 30 { // 最多等待 5 分钟 (30 * 10s)
-				addLog("warning", fmt.Sprintf("检测到域名 %s DNS 解析未同步：当前解析为 %s，预期为 %s。等待 DNS 缓存刷新 (%d/30)...", probeDomain, currentIP, expectedIP, dnsSyncAttempts))
-				time.Sleep(10 * time.Second)
-				continue
-			} else {
-				addLog("error", "DNS 解析同步超时（已等待 5 分钟），强制继续探测...")
+		if expectedIP != "" {
+			if currentIP == expectedIP {
 				configMutex.Lock()
-				lastChangedIP = "" // 清除期望，避免继续阻塞
+				lastChangedIP = "" // 匹配成功后，必须清空期望
+				discardedIP = ""   // DNS 已成功同步为新 IP，清空废弃旧 IP 记录
 				configMutex.Unlock()
 				dnsSyncAttempts = 0
+				addLog("success", fmt.Sprintf("域名 %s 记录已与预期最新 IP %s 成功同步！", probeDomain, currentIP))
+			} else {
+				dnsSyncAttempts++
+				if dnsSyncAttempts < 30 { // 最多等待 5 分钟 (30 * 10s)
+					addLog("warning", fmt.Sprintf("检测到域名 %s 记录未同步：当前为 %s，预期为 %s。等待刷新 (%d/30)...", probeDomain, currentIP, expectedIP, dnsSyncAttempts))
+					time.Sleep(10 * time.Second)
+					continue
+				} else {
+					addLog("error", "记录同步超时（已等待 5 分钟），解除等待继续探测...")
+					configMutex.Lock()
+					lastChangedIP = "" // 清除期望，避免继续阻塞
+					configMutex.Unlock()
+					dnsSyncAttempts = 0
+				}
 			}
 		} else {
 			dnsSyncAttempts = 0 // 同步成功，重置计数器
-			if expectedIP != "" {
-				configMutex.Lock()
-				lastChangedIP = "" // 匹配成功后，必须清空期望，防止常规轮询重复执行无谓对比和提示
-				configMutex.Unlock()
-				addLog("success", fmt.Sprintf("域名 %s DNS 解析已与最新 IP %s 成功同步！", probeDomain, currentIP))
+		}
+
+		// 确定本次探测的目标 IP (detectIP)，坚决屏蔽已废弃旧 IP 与 DNS 滞后缓存干扰
+		detectIP := currentIP
+		if discIP != "" && currentIP == discIP {
+			// DNS 解析出来的居然是刚才换掉的废弃旧 IP！
+			if actIP != "" && actIP != discIP {
+				detectIP = actIP
+				addLog("warning", fmt.Sprintf("域名解析结果 (%s) 为刚换掉的废弃旧 IP (DNS尚未更新)，自动锁定最新可用新 IP (%s) 进行探测！", currentIP, actIP))
+			}
+		} else if actIP != "" && currentIP != actIP {
+			// 解析出的 IP 与已知最新存活 IP 不一致，先快速探测已知存活 IP 是否还在工作
+			conn, err := net.DialTimeout("tcp", net.JoinHostPort(actIP, strconv.Itoa(port)), 2*time.Second)
+			if err == nil {
+				conn.Close()
+				detectIP = actIP
+				addLog("info", fmt.Sprintf("域名解析为 %s，但当前确认的有效新 IP %s 仍保持通畅，继续锁定该 IP 测活 (忽略滞后 DNS 解析)。", currentIP, actIP))
+			} else {
+				detectIP = currentIP
+				if cfIP != "" {
+					addLog("warning", fmt.Sprintf("检测到 Cloudflare 权威记录已更新为 %s，原可用 IP %s 已不通。以 CF 最新 IP 为准探测。", currentIP, actIP))
+				} else {
+					addLog("warning", fmt.Sprintf("域名解析已更新为 %s，原可用 IP %s 已不通。以最新解析 IP 为准探测。", currentIP, actIP))
+				}
 			}
 		}
 
-		detectIP := currentIP
-		configMutex.RLock()
-		actIP := activeIP
-		configMutex.RUnlock()
-		if actIP != "" && currentIP != actIP {
-			addLog("warning", fmt.Sprintf("域名解析结果为 %s，与确认可用 IP %s 不一致，可能处于 DNS 缓存抖动中。将使用 %s 进行本次健康探测以防误判。", currentIP, actIP, actIP))
-			detectIP = actIP
-		}
+		configMutex.Lock()
+		statusIP = detectIP
+		configMutex.Unlock()
 
 		// 2. 进行 TCP 端口连接测试 (一旦失败，立即在 6 秒内连续快速探测 3 次复核，防止网络偶发抖动导致误判，大幅缩短断网响应时间)
 		address := net.JoinHostPort(detectIP, strconv.Itoa(port))
@@ -688,16 +774,123 @@ func probeLoop() {
 				break
 			}
 
-			addLog("error", fmt.Sprintf("TCP 探测失败 (%d/3): 无法连接到 %s (原因: %v)", checkIdx, address, err))
+			addLog("error", fmt.Sprintf("本地 TCP 探测失败 (%d/3): 无法连接到 %s (原因: %v)", checkIdx, address, err))
 			if checkIdx < 3 {
 				time.Sleep(2 * time.Second)
 			}
 		}
 
 		if !isAlive {
+			// 新增防呆：如果探测失败且 detectIP != actIP，尝试回退探测原可用 IP
+			if actIP != "" && detectIP != actIP {
+				addLog("warning", fmt.Sprintf("目标 IP %s 探测失败，尝试对备选有效 IP %s 进行后备测活...", detectIP, actIP))
+				conn, err := net.DialTimeout("tcp", net.JoinHostPort(actIP, strconv.Itoa(port)), 5*time.Second)
+				if err == nil {
+					conn.Close()
+					addLog("success", fmt.Sprintf("备选有效 IP %s 依然畅通！维持原有状态不变。", actIP))
+					statusState = "online"
+					time.Sleep(time.Duration(interval) * time.Second)
+					continue
+				}
+				addLog("error", fmt.Sprintf("备选有效 IP %s 也已失效。", actIP))
+			}
+
+			// --- 【第 1 道守卫：本地断网保护】 ---
+			if !checkLocalInternetAlive() {
+				statusState = "network_down"
+				addLog("error", "[本地网络断网保护] 检测到本地设备自身无法访问公网 (223.5.5.5:53 连接失败)，已安全阻止换 IP 操作，等待本地网络恢复...")
+				time.Sleep(time.Duration(interval) * time.Second)
+				continue
+			}
+
+			// --- 【第 2 道守卫：外部第三方多地测活二次确认 (方案 C)】 ---
+			configMutex.RLock()
+			extEnabled := config.ExternalCheckEnabled
+			extURL := config.ExternalCheckURL
+			configMutex.RUnlock()
+
+			if extEnabled && extURL != "" {
+				addLog("warning", fmt.Sprintf("本地探测 %s 失败，启动外部第三方异地探针复核连通性...", address))
+				extStatus, extMsg := checkExternalLiveness(detectIP, port)
+				if extStatus == ExtResultAlive {
+					statusState = "online"
+					addLog("success", fmt.Sprintf("[外部二次确认通过] 本地探测不通，但外部异地探针检测 %s 为畅通！(%s)。判定为本地单点运营商路由阻断，其他网络正常，坚决不换 IP！", address, extMsg))
+					time.Sleep(time.Duration(interval) * time.Second)
+					continue
+				} else if extStatus == ExtResultError {
+					// 核心防线：探针自身故障，绝不盲目换 IP！
+					statusState = "probe_error"
+					addLog("error", fmt.Sprintf("[外部探针自身故障] 无法连接到外部测活接口 (%s)！缺乏有效第三方复核，为防误杀已安全终止换 IP，维持现有 IP 不变。", extMsg))
+					time.Sleep(time.Duration(interval) * time.Second)
+					continue
+				} else {
+					// ExtResultDead: 外部探针正常运行且明确告知目标不通！
+					addLog("error", fmt.Sprintf("[双重确认均失败] 本地探测不通，且外部异地探针复核同样无法连通 %s (%s)！确认目标被阻断或服务离线。", address, extMsg))
+				}
+			}
+
+			configMutex.RLock()
+			autoChangeEnabled := autoChange
+			configMutex.RUnlock()
+
 			statusState = "blocked"
-			addLog("error", "连续 3 次快速探测均失败，判定当前 IP 已被墙或端口阻断！")
-			if autoChange {
+			addLog("error", "本地与外部探针均无法连通，判定当前 IP 已失效！")
+
+			configMutex.RLock()
+			graceWaitSec := config.WaitSecondsAfterChange
+			if graceWaitSec <= 0 {
+				graceWaitSec = 90
+			}
+			configMutex.RUnlock()
+
+			// 动态宽限期机制，防止 Hinet 自然重新拨号且 DDNS 尚未同步的真空期导致误判
+			gracePeriodPassed := false
+			if autoChangeEnabled {
+				addLog("warning", fmt.Sprintf("为防止 Hinet 自然更换 IP 导致 DDNS 未及时同步，进入 %d 秒宽限期观察远端记录与连通性...", graceWaitSec))
+				graceStartTime := time.Now()
+				lastLoggedIP := currentIP
+				for time.Since(graceStartTime) < time.Duration(graceWaitSec)*time.Second {
+					time.Sleep(5 * time.Second)
+					
+					testIP := detectIP // 默认继续测活失败的那个
+					if cfToken != "" && zoneIDToUse != "" {
+						newCfIP := getCloudflareDDNS(cfToken, zoneIDToUse, probeDomain)
+						if newCfIP != "" {
+							testIP = newCfIP
+							if newCfIP != lastLoggedIP {
+								addLog("info", fmt.Sprintf("宽限期内检测到 CF 权威记录变更为 %s！正在尝试测活...", newCfIP))
+								lastLoggedIP = newCfIP
+							}
+						}
+					}
+					
+					conn, err := net.DialTimeout("tcp", net.JoinHostPort(testIP, strconv.Itoa(port)), 3*time.Second)
+					if err == nil {
+						conn.Close()
+						addLog("success", fmt.Sprintf("宽限期内测活成功 (IP: %s)！确认为自然恢复或自然换 IP 成功，取消主动换 IP 计划。", testIP))
+						configMutex.Lock()
+						activeIP = testIP
+						lastChangedIP = testIP
+						statusIP = testIP
+						configMutex.Unlock()
+						statusState = "online"
+						gracePeriodPassed = true
+						break
+					}
+				}
+
+				if !gracePeriodPassed {
+					addLog("error", fmt.Sprintf("%d 秒宽限期结束，依然未检测到存活状态，准备执行主动更换 IP 指令。", graceWaitSec))
+				}
+			}
+
+			if gracePeriodPassed {
+				// 在宽限期内已恢复，直接进入下一个循环
+				time.Sleep(time.Duration(interval) * time.Second)
+				continue
+			}
+
+			if autoChangeEnabled {
 				if !lastFailedChangeTime.IsZero() && time.Since(lastFailedChangeTime) < 5*time.Minute {
 					addLog("warning", fmt.Sprintf("IP自动更换目前处于 5 分钟冷却期内（已过去 %s），跳过本次更换以防止被限速或锁死。", time.Since(lastFailedChangeTime).Truncate(time.Second)))
 				} else {
@@ -714,6 +907,12 @@ func probeLoop() {
 		} else {
 			// 连接成功，网络正常
 			statusState = "online"
+			if actIP != detectIP {
+				configMutex.Lock()
+				activeIP = detectIP
+				configMutex.Unlock()
+				addLog("success", fmt.Sprintf("确认新记录 IP %s 可用，已更新内部状态。", detectIP))
+			}
 		}
 		time.Sleep(time.Duration(interval) * time.Second)
 	}
@@ -1273,12 +1472,15 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 	defer monitorStatusesMutex.RUnlock()
 
 	data := map[string]interface{}{
-		"ip":                  statusIP,
-		"state":               statusState,
-		"last_check":          lastCheck.Format(time.RFC3339),
-		"auto_change_enabled": config.AutoChangeEnabled,
-		"logs":                logs,
-		"monitor_statuses":    monitorStatuses,
+		"ip":                     statusIP,
+		"state":                  statusState,
+		"last_check":             lastCheck.Format(time.RFC3339),
+		"auto_change_enabled":    config.AutoChangeEnabled,
+		"external_check_enabled": config.ExternalCheckEnabled,
+		"active_ip":              activeIP,
+		"discarded_ip":           discardedIP,
+		"logs":                   logs,
+		"monitor_statuses":       monitorStatuses,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(data)
@@ -1333,15 +1535,25 @@ func handleCheck(w http.ResponseWriter, r *http.Request) {
 		if activeIP == "" {
 			activeIP = currentIP
 		}
+		actIP := activeIP
+		discIP := discardedIP
 		configMutex.Unlock()
 
 		detectIP := currentIP
-		configMutex.RLock()
-		actIP := activeIP
-		configMutex.RUnlock()
-		if actIP != "" && currentIP != actIP {
-			addLog("warning", fmt.Sprintf("域名解析结果为 %s，与确认可用 IP %s 不一致，可能处于 DNS 缓存抖动中。将使用 %s 进行本次探测以防误判。", currentIP, actIP, actIP))
-			detectIP = actIP
+		if discIP != "" && currentIP == discIP {
+			if actIP != "" && actIP != discIP {
+				detectIP = actIP
+				addLog("warning", fmt.Sprintf("手动探测：域名解析结果 (%s) 为废弃旧 IP，自动锁定最新可用新 IP (%s) 探测！", currentIP, actIP))
+			}
+		} else if actIP != "" && currentIP != actIP {
+			conn, err := net.DialTimeout("tcp", net.JoinHostPort(actIP, strconv.Itoa(port)), 2*time.Second)
+			if err == nil {
+				conn.Close()
+				detectIP = actIP
+				addLog("info", fmt.Sprintf("手动探测：域名解析为 %s，但当前确认的有效新 IP %s 仍保持通畅，优先使用有效 IP 测活！", currentIP, actIP))
+			} else {
+				detectIP = currentIP
+			}
 		}
 
 		// 2. TCP 探测
@@ -1350,10 +1562,31 @@ func handleCheck(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			statusState = "blocked"
 			addLog("error", fmt.Sprintf("手动探测失败：无法连接到 %s (原因: %v)", address, err))
+
+			// 辅助诊断：本地网络断网检查与外部探针检查
+			if !checkLocalInternetAlive() {
+				addLog("error", "手动探测辅助诊断：检测到您本地设备自身无法访问公网 (223.5.5.5:53 失败)，说明当前机器断网！")
+			} else {
+				configMutex.RLock()
+				extEnabled := config.ExternalCheckEnabled
+				extURL := config.ExternalCheckURL
+				configMutex.RUnlock()
+				if extEnabled && extURL != "" {
+					addLog("warning", fmt.Sprintf("本地探测 %s 不通，正在尝试外部第三方探针复核...", address))
+					extStatus, extMsg := checkExternalLiveness(detectIP, port)
+					if extStatus == ExtResultAlive {
+						addLog("success", fmt.Sprintf("外部探针复核结果：外部节点可成功连通 %s！(%s)。确认为本地单点网络波动！", address, extMsg))
+					} else if extStatus == ExtResultError {
+						addLog("warning", fmt.Sprintf("外部探针辅助诊断：外部测活接口自身不可用 (%s)。请检查接口网络配置！", extMsg))
+					} else {
+						addLog("error", fmt.Sprintf("外部探针复核结果：外部节点同样无法连通 %s (%s)！", address, extMsg))
+					}
+				}
+			}
 		} else {
 			conn.Close()
 			statusState = "online"
-			addLog("success", fmt.Sprintf("手动探测成功：连接 %s 通畅，当前公网 IP: %s", address, currentIP))
+			addLog("success", fmt.Sprintf("手动探测成功：连接 %s 通畅，当前测试 IP: %s", address, detectIP))
 		}
 		lastCheck = time.Now()
 	}()
@@ -1387,10 +1620,14 @@ func handleSaveConfig(w http.ResponseWriter, r *http.Request) {
 	config.MonitorWebhook = newCfg.MonitorWebhook
 	config.MonitorIntervalSec = newCfg.MonitorIntervalSec
 	config.MonitorProxy = newCfg.MonitorProxy
+	config.ExternalCheckEnabled = newCfg.ExternalCheckEnabled
+	config.ExternalCheckURL = newCfg.ExternalCheckURL
+	config.ExternalCheckKeyword = newCfg.ExternalCheckKeyword
+	config.ExternalCheckTimeout = newCfg.ExternalCheckTimeout
 	saveConfigNoLock()
 	configMutex.Unlock()
 
-	addLog("success", "监控参数配置已成功更新并保存。")
+	addLog("success", "监控参数配置已成功更新并保存（外部测活与防旧IP配置已热生效）。")
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -1694,6 +1931,99 @@ const htmlTemplate = `
             border-color: var(--primary);
         }
 
+        /* 优雅子卡片面板与快捷标签 */
+        .sub-card {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(56, 189, 248, 0.2);
+            border-radius: 14px;
+            padding: 16px 18px;
+            margin: 18px 0;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+        }
+
+        .sub-card.cf {
+            border-color: rgba(168, 85, 247, 0.2);
+        }
+
+        .sub-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .sub-card-title {
+            font-size: 0.92rem;
+            font-weight: 700;
+            color: #38bdf8;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .sub-card-title.purple {
+            color: #c084fc;
+        }
+
+        .sub-card-desc {
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            line-height: 1.5;
+            margin-bottom: 12px;
+            background: rgba(56, 189, 248, 0.05);
+            border-left: 3px solid #38bdf8;
+            padding: 6px 10px;
+            border-radius: 0 6px 6px 0;
+        }
+
+        .sub-card-desc.purple {
+            background: rgba(168, 85, 247, 0.05);
+            border-left-color: #a855f7;
+        }
+
+        .preset-container {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 10px;
+            flex-wrap: wrap;
+        }
+
+        .preset-label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+
+        .preset-chip {
+            background: rgba(56, 189, 248, 0.1);
+            color: #38bdf8;
+            border: 1px solid rgba(56, 189, 248, 0.25);
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            white-space: nowrap;
+        }
+
+        .preset-chip:hover {
+            background: rgba(56, 189, 248, 0.22);
+            border-color: rgba(56, 189, 248, 0.5);
+            transform: translateY(-1px);
+        }
+
+        .preset-chip.purple {
+            background: rgba(168, 85, 247, 0.1);
+            color: #c084fc;
+            border-color: rgba(168, 85, 247, 0.25);
+        }
+
+        .preset-chip.purple:hover {
+            background: rgba(168, 85, 247, 0.22);
+            border-color: rgba(168, 85, 247, 0.5);
+        }
+
         /* 日志区域 */
         .logs-container {
             max-height: 480px;
@@ -1868,7 +2198,7 @@ const htmlTemplate = `
                             <input type="number" class="form-control" name="check_interval_seconds" value="{{.CheckIntervalSeconds}}" required>
                         </div>
                         <div class="form-group">
-                            <label>换IP后等待上线 (秒)</label>
+                            <label>宽限观察与等待上线 (秒)</label>
                             <input type="number" class="form-control" name="wait_seconds_after_change" value="{{.WaitSecondsAfterChange}}" required>
                         </div>
                         <div class="form-group">
@@ -1876,14 +2206,55 @@ const htmlTemplate = `
                             <input type="text" class="form-control" name="listen_addr" value="{{.ListenAddr}}" required>
                         </div>
                     </div>
-                    <div style="border-top: 1px solid rgba(255, 255, 255, 0.1); margin: 20px 0; padding-top: 20px;">
-                        <h4 style="margin: 0 0 12px 0; color: var(--primary);">Cloudflare DDNS 联动 (可选)</h4>
-                        <p style="font-size: 12px; color: var(--text-muted); margin: 0 0 16px 0;">配置后，换 IP 成功后会自动更新 Cloudflare 的 A 记录，无需 VPS 本地定时任务。</p>
-                        <div class="form-group">
+                    <!-- 外部多地测活二次确认 (方案 C) 专属精致卡片 -->
+                    <div class="sub-card">
+                        <div class="sub-card-header">
+                            <div class="sub-card-title">
+                                <span>🌐 外部多地测活二次确认 (方案 C，防单点误切)</span>
+                            </div>
+                            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.82rem; font-weight: 600; color: #38bdf8;">
+                                <input type="checkbox" name="external_check_enabled" value="true" {{if .ExternalCheckEnabled}}checked{{end}}> 启用二次确认
+                            </label>
+                        </div>
+                        <div class="sub-card-desc">
+                            当本地探测失败时，先由本地守卫检查公网连通性，再调用外部异地 API 复核。外部能通则判定为本地单点网络波动，<strong>坚决不换 IP</strong>；若外部探针自身故障或超时，自动进入<strong>防误杀保护</strong>，绝不乱切！
+                        </div>
+                        <div class="form-group" style="margin-bottom: 12px;">
+                            <label>外部测活 API URL 模板 (支持 <code style="color:#38bdf8">{ip}</code> 和 <code style="color:#38bdf8">{port}</code> 占位符)</label>
+                            <input type="text" class="form-control" id="external_check_url" name="external_check_url" value="{{.ExternalCheckURL}}" placeholder="https://v2.xxapi.cn/api/tcping?address={ip}&port={port}">
+                        </div>
+                        <div class="form-row-2">
+                            <div class="form-group">
+                                <label>成功判断关键字 (留空则以 HTTP 200 为准)</label>
+                                <input type="text" class="form-control" id="external_check_keyword" name="external_check_keyword" value="{{.ExternalCheckKeyword}}" placeholder="例如 ping 或 open">
+                            </div>
+                            <div class="form-group">
+                                <label>请求超时时间 (秒)</label>
+                                <input type="number" class="form-control" name="external_check_timeout" value="{{.ExternalCheckTimeout}}" min="3" max="30">
+                            </div>
+                        </div>
+                        <div class="preset-container">
+                            <span class="preset-label">快捷填充模板:</span>
+                            <button type="button" class="preset-chip" onclick="fillPreset('xxapi')">⚡ 国内高可用公网 TCPing (推荐免配置)</button>
+                            <button type="button" class="preset-chip purple" onclick="fillPreset('serverless')">☁️ 自建云函数/国内VPS</button>
+                        </div>
+                    </div>
+
+                    <!-- Cloudflare DDNS 联动专属精致卡片 -->
+                    <div class="sub-card cf">
+                        <div class="sub-card-header">
+                            <div class="sub-card-title purple">
+                                <span>☁️ Cloudflare DDNS 联动 (可选)</span>
+                            </div>
+                        </div>
+                        <div class="sub-card-desc purple">
+                            配置后换 IP 成功会自动更新 Cloudflare 的 A 记录。未配置时将完全依赖远端机器的自带 DDNS。
+                        </div>
+                        <div class="form-group" style="margin-bottom: 12px;">
                             <label>Cloudflare API Token</label>
                             <input type="password" class="form-control" name="cf_token" value="{{.CFToken}}" placeholder="输入具有 DNS:Edit 权限的 Token">
                         </div>
-                        <div class="form-group" style="margin-top: 12px;">
+                        <div class="form-group" style="margin-bottom: 0;">
                             <label>Cloudflare Zone ID</label>
                             <input type="text" class="form-control" name="cf_zone_id" value="{{.CFZoneID}}" placeholder="输入域名所在的 Zone ID">
                         </div>
@@ -2011,17 +2382,34 @@ const htmlTemplate = `
             }
         }
 
+        function fillPreset(type) {
+            const urlInput = document.getElementById('external_check_url');
+            const kwInput = document.getElementById('external_check_keyword');
+            if (type === 'xxapi') {
+                urlInput.value = 'https://v2.xxapi.cn/api/tcping?address={ip}&port={port}';
+                kwInput.value = 'ping';
+            } else if (type === 'serverless') {
+                urlInput.value = 'https://你的云函数或国内VPS/ping?ip={ip}&port={port}';
+                kwInput.value = 'open';
+            }
+        }
+
         async function saveConfig(e) {
             e.preventDefault();
-            const formData = new FormData(e.target);
+            const form = e.target;
+            const formData = new FormData(form);
             const data = {};
             formData.forEach((value, key) => {
-                if (key === 'hinet_port' || key === 'check_interval_seconds' || key === 'check_port' || key === 'wait_seconds_after_change' || key === 'monitor_interval_sec') {
+                if (key === 'hinet_port' || key === 'check_interval_seconds' || key === 'check_port' || key === 'wait_seconds_after_change' || key === 'monitor_interval_sec' || key === 'external_check_timeout') {
                     data[key] = value ? parseInt(value, 10) : 0;
                 } else {
                     data[key] = value;
                 }
             });
+
+            // 获取 Checkbox 状态
+            const extCheckEl = form.querySelector('input[name="external_check_enabled"]');
+            data['external_check_enabled'] = extCheckEl ? extCheckEl.checked : false;
 
             try {
                 const res = await fetch('/api/save', {
@@ -2030,7 +2418,7 @@ const htmlTemplate = `
                     body: JSON.stringify(data)
                 });
                 if (res.ok) {
-                    alert("配置已成功保存！");
+                    alert("配置已成功保存！外部测活及防旧IP配置已立即生效。");
                     fetchStatus();
                 } else {
                     alert("配置保存失败，请检查数据。");
