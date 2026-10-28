@@ -50,13 +50,18 @@ func GenerateEntryConfig(entry *models.EntryNode, rules []models.ForwardingRule,
 	}
 
 	// 证书路径
+	cleanEntryDomain := strings.TrimSpace(entry.Domain)
+	rootCertDomain := cleanEntryDomain
+	if strings.HasPrefix(rootCertDomain, "*.") {
+		rootCertDomain = rootCertDomain[2:]
+	}
 	certPath := entry.Certificate
 	if certPath == "" {
-		certPath = "/etc/stealthforward/certs/" + entry.Domain + "/cert.crt"
+		certPath = "/etc/stealthforward/certs/" + rootCertDomain + "/cert.crt"
 	}
 	keyPath := entry.Key
 	if keyPath == "" {
-		keyPath = "/etc/stealthforward/certs/" + entry.Domain + "/cert.key"
+		keyPath = "/etc/stealthforward/certs/" + rootCertDomain + "/cert.key"
 	}
 
 	// 自动下发证书内容给 Agent (为了支持多负载机同步)
@@ -396,6 +401,18 @@ func GenerateEntryConfig(entry *models.EntryNode, rules []models.ForwardingRule,
 					},
 				}
 			}
+		} else if m, ok := portToMapping[port]; ok && m.Domain != "" {
+			// 标准 TLS 泛域名分流定制：各子端口采用各自的子域名 SNI，复用主通配符证书
+			targetHost := strings.TrimSpace(m.Domain)
+			if strings.Contains(targetHost, ":") {
+				targetHost = strings.Split(targetHost, ":")[0]
+			}
+			subTls := make(map[string]interface{})
+			for k, v := range tlsConfig {
+				subTls[k] = v
+			}
+			subTls["server_name"] = targetHost
+			portTlsConfig = subTls
 		}
 
 		inbound := map[string]interface{}{

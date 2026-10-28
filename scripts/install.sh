@@ -85,14 +85,20 @@ show_logo() {
 
 issue_certificate() {
   local domain=$1
-  if [ -z "$domain" ]; then
-    echo -e "${YELLOW}证书申请阶段: 若要使用 SSL 必须填入该节点对应的域名。${NC}"
-    read -p "请输入当前节点的证书域名 (e.g. transit.example.com): " domain
+  if [ "$REALITY_MODE" = "1" ]; then
+    echo -e "${GREEN}[StealthForward] 当前节点为 Reality 借壳伪装协议，完全免证书运行，直接跳过证书申请！${NC}"
+    return 0
   fi
-  
+
+  # 判断是否为 IP 地址（纯数字和点，ACME CA 无法为 IP 签发免费证书）
+  if echo "$domain" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
+    echo -e "${YELLOW}检测到节点连接地址为 IP ($domain)，ACME 不支持为 IP 签发证书，跳过自动申请。${NC}"
+    return 0
+  fi
+
   if [ -z "$domain" ]; then
-    echo -e "${RED}警告: 域名为空，将跳过证书申请，sing-box 可能会因为找不到证书文件启动失败。${NC}"
-    return 1
+    echo -e "${YELLOW}未提供证书域名，跳过证书申请。${NC}"
+    return 0
   fi
 
   # 检查证书是否已存在（避免重复申请被限速）
@@ -437,8 +443,12 @@ install_agent() {
     read -p "请输入管理口令 (STEALTH_ADMIN_TOKEN) [留空则无需鉴权]: " CTRL_TOKEN
   fi
 
-  # 4. 证书申请流程 (核心改进)
-  issue_certificate "$CTRL_DOMAIN"
+  # 4. 证书申请流程 (Reality 模式彻底免证书)
+  if [ "$REALITY_MODE" = "1" ]; then
+    echo -e "${GREEN}[StealthForward] 当前节点为 Reality 借壳伪装协议，完全免证书运行，直接跳过证书与 Nginx 流程！${NC}"
+  elif [ -n "$CTRL_DOMAIN" ]; then
+    issue_certificate "$CTRL_DOMAIN"
+  fi
 
   if [ "$INIT_SYSTEM" = "systemd" ]; then
     cat > /etc/systemd/system/stealth-agent.service <<EOF

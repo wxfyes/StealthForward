@@ -36,7 +36,7 @@ import (
 
 const (
 	// Version 客户端版本号
-	Version = "v3.9.26"
+	Version = "v3.9.27"
 )
 
 type Config struct {
@@ -517,18 +517,24 @@ func (a *Agent) RunOnce() {
 	}
 }
 
-// IssueCertLocally 为域名申请 ACME 证书（优先 DNS-01，后退 Webroot/Standalone）
+// IssueCertLocally 为域名申请 ACME 证书（优先 DNS-01 泛域名通配符，后退 Webroot/Standalone）
 func (a *Agent) IssueCertLocally(domain string, cfToken string) {
-	// 首先检查证书是否已经存在
-	certDir := "/etc/stealthforward/certs/" + domain
+	cleanDomain := strings.TrimSpace(domain)
+	rootDomain := cleanDomain
+	isWildcard := strings.HasPrefix(cleanDomain, "*.")
+	if isWildcard {
+		rootDomain = cleanDomain[2:]
+	}
+
+	// 统一证书存储目录为根域名目录（避免文件名含星号导致文件系统异常）
+	certDir := "/etc/stealthforward/certs/" + rootDomain
 	certFile := certDir + "/cert.crt"
 	keyFile := certDir + "/cert.key"
 
 	if _, err := os.Stat(certFile); err == nil {
 		if _, err := os.Stat(keyFile); err == nil {
-			// 增加检查：如果证书存在，判断是否快过期了 (小于 7 天则重新申请)
 			if !a.isCertExpiredSoon(certFile, 7) {
-				log.Printf("Certificate for %s already exists and is valid, skipping issuance.", domain)
+				log.Printf("Certificate for %s (Root: %s) already exists and is valid, skipping issuance.", domain, rootDomain)
 				return
 			}
 			log.Printf("Certificate for %s is expired or about to expire, re-issuing...", domain)
@@ -536,16 +542,12 @@ func (a *Agent) IssueCertLocally(domain string, cfToken string) {
 	}
 
 	// 判断是否为 IP 地址 - ACME CA 不支持为 IP 签发证书
-	if net.ParseIP(domain) != nil {
-		log.Printf("[%s] Detected IP address. ACME CAs (Let's Encrypt, ZeroSSL) do not support IP certificates.", domain)
-		log.Printf("[%s] Please manually place your certificate files at:", domain)
-		log.Printf("  - Certificate: %s", certFile)
-		log.Printf("  - Private Key: %s", keyFile)
-		log.Printf("[%s] Skipping automatic certificate issuance.", domain)
+	if net.ParseIP(rootDomain) != nil {
+		log.Printf("[%s] Detected IP address. ACME CAs do not support IP certificates. Skipping.", rootDomain)
 		return
 	}
 
-	log.Printf("Starting local ACME issuance for %s...", domain)
+	log.Printf("Starting local ACME issuance for %s (Root: %s, Wildcard: %v)...", domain, rootDomain, isWildcard)
 	home, _ := os.UserHomeDir()
 	acmePath := filepath.Join(home, ".acme.sh/acme.sh")
 
@@ -588,7 +590,7 @@ func (a *Agent) IssueCertLocally(domain string, cfToken string) {
 	acmePath = foundPath
 
 	// 尝试自动匹配宝塔之类的 webroot
-	btPath := "/www/wwwroot/" + domain
+	btPath := "/www/wwwroot/" + rootDomain
 	webroot := "/var/www/html"
 	if _, err := os.Stat(btPath); err == nil {
 		webroot = btPath
@@ -596,7 +598,7 @@ func (a *Agent) IssueCertLocally(domain string, cfToken string) {
 
 	// 默认使用 letsencrypt，如果受限可以考虑 zerossl
 	caServer := "letsencrypt"
-	email := "admin@" + domain
+	email := "admin@" + rootDomain
 
 	// 1. 尝试注册账号
 	log.Printf("Registering ACME account for %s...", email)
@@ -606,27 +608,41 @@ func (a *Agent) IssueCertLocally(domain string, cfToken string) {
 	var err error
 	var cmd *exec.Cmd
 
-	// === 终极稳定方案：DNS-01 挑战 (如果有 CF_Token) ===
+	// === 终极稳定方案：DNS-01 挑战 (如果有 CF_Token，支持双域名通配符签发) ===
 	if cfToken != "" {
-		log.Printf("!!! CF_Token detected, using DNS-01 challenge for ultimate stability on multi-IP architectures !!!")
+		log.Printf("!!! CF_Token detected, using DNS-01 challenge for %s (Root: %s) !!!", domain, rootDomain)
 		os.Setenv("CF_Token", cfToken)
-		
-		dnsCmd := exec.Command(acmePath, "--issue", "--server", caServer, "--dns", "dns_cf", "-d", domain, "--force")
+
+		var dnsArgs []string
+		if isWildcard || strings.Count(rootDomain, ".") == 1 {
+			// 通配符双域名签发模式：同时包含 rootDomain 和 *.rootDomain
+			log.Printf("!!! 启用 Cloudflare 泛域名通配符签发模式: -d %s -d *.%s !!!", rootDomain, rootDomain)
+			dnsArgs = []string{"--issue", "--server", caServer, "--dns", "dns_cf", "-d", rootDomain, "-d", "*." + rootDomain, "--force"}
+		} else {
+			dnsArgs = []string{"--issue", "--server", caServer, "--dns", "dns_cf", "-d", cleanDomain, "--force"}
+		}
+
+		dnsCmd := exec.Command(acmePath, dnsArgs...)
 		output, err = dnsCmd.CombinedOutput()
-		
+
 		if err == nil {
 			log.Printf("DNS-01 challenge succeeded for %s via Cloudflare!", domain)
-			goto InstallCert // 直接跳转到安装和上传步骤
+			goto InstallCert
 		} else {
 			outputStr := string(output)
 			log.Printf("DNS-01 challenge failed: %s. Retrying with ZeroSSL...", outputStr)
 			if strings.Contains(outputStr, "rateLimited") {
 				caServer = "zerossl"
 				exec.Command(acmePath, "--register-account", "-m", email, "--server", caServer).Run()
-				dnsCmd = exec.Command(acmePath, "--issue", "--server", caServer, "--dns", "dns_cf", "-d", domain, "--force")
+				if isWildcard || strings.Count(rootDomain, ".") == 1 {
+					dnsArgs = []string{"--issue", "--server", caServer, "--dns", "dns_cf", "-d", rootDomain, "-d", "*." + rootDomain, "--force"}
+				} else {
+					dnsArgs = []string{"--issue", "--server", caServer, "--dns", "dns_cf", "-d", cleanDomain, "--force"}
+				}
+				dnsCmd = exec.Command(acmePath, dnsArgs...)
 				output, err = dnsCmd.CombinedOutput()
 			}
-			
+
 			if err == nil {
 				log.Printf("DNS-01 challenge succeeded for %s with ZeroSSL via Cloudflare!", domain)
 				goto InstallCert
@@ -680,14 +696,18 @@ func (a *Agent) IssueCertLocally(domain string, cfToken string) {
 InstallCert:
 	log.Printf("Successfully issued certificate for %s", domain)
 
-	// 安装证书到本地指定目录
-	// 注意：acme.sh 安装时会自动提取 fullchain
-	certDir = "/etc/stealthforward/certs/" + domain
+	// 安装证书到本地指定目录（统一定位到 rootDomain 路径）
+	certDir = "/etc/stealthforward/certs/" + rootDomain
 	os.MkdirAll(certDir, 0755)
 	certFile = certDir + "/cert.crt"
 	keyFile = certDir + "/cert.key"
 
-	cmd = exec.Command(acmePath, "--install-cert", "-d", domain,
+	installDomain := rootDomain
+	if !isWildcard && strings.Count(rootDomain, ".") > 1 {
+		installDomain = cleanDomain
+	}
+
+	cmd = exec.Command(acmePath, "--install-cert", "-d", installDomain,
 		"--fullchain-file", certFile,
 		"--key-file", keyFile)
 	if err := cmd.Run(); err != nil {
