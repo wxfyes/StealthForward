@@ -36,7 +36,7 @@ import (
 
 const (
 	// Version 客户端版本号
-	Version = "v3.9.23"
+	Version = "v3.9.24"
 )
 
 type Config struct {
@@ -58,6 +58,7 @@ type Agent struct {
 	externalTraffic map[uint][2]int64
 	trafficMu       sync.Mutex
 	fm              *ForwardManager
+	sniRouter       *SNIRouter
 }
 
 func NewAgent(cfg Config) *Agent {
@@ -74,6 +75,7 @@ func NewAgent(cfg Config) *Agent {
 		client:          &http.Client{Timeout: 10 * time.Second},
 		externalTraffic: make(map[uint][2]int64),
 		fm:              NewForwardManager(cfg.NodeID, cfg.LocalConfigDir),
+		sniRouter:       NewSNIRouter(),
 	}
 	// 启动时确保伪装页存在
 	a.EnsureMasquerade()
@@ -229,11 +231,27 @@ func (a *Agent) ApplyConfig(configStr string) error {
 		}
 	}
 
-	// 2. 移除 root 级的 provision 字段后再写入文件，防止内核解码失败
+	// 2. 移除 root 级的 provision 和 sni_routes 字段后再写入文件，防止内核解码失败
 	var configMap map[string]interface{}
 	finalConfigStr := configStr
 	if err := json.Unmarshal([]byte(configStr), &configMap); err == nil {
 		delete(configMap, "provision")
+
+		// 提取 SNI 路由并热更新 443 智能分流
+		if sr, ok := configMap["sni_routes"].(map[string]interface{}); ok && len(sr) > 0 {
+			newRoutes := make(map[string]int)
+			for sni, portVal := range sr {
+				if p, ok := portVal.(float64); ok {
+					newRoutes[sni] = int(p)
+				}
+			}
+			fallback := "127.0.0.1:8081"
+			a.sniRouter.UpdateRoutes(newRoutes, fallback)
+		} else {
+			a.sniRouter.UpdateRoutes(nil, "127.0.0.1:8081")
+		}
+		delete(configMap, "sni_routes")
+
 		if bytes, err := json.MarshalIndent(configMap, "", "  "); err == nil {
 			finalConfigStr = string(bytes)
 		}

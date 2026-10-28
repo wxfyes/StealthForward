@@ -20,6 +20,7 @@ type SingBoxConfig struct {
 	Outbounds []interface{}     `json:"outbounds"`
 	Inbounds  []interface{}     `json:"inbounds"`
 	Provision map[string]string `json:"provision,omitempty"`
+	SNIRoutes map[string]int    `json:"sni_routes,omitempty"`
 }
 
 func GenerateEntryConfig(entry *models.EntryNode, rules []models.ForwardingRule, exits []models.ExitNode) (string, error) {
@@ -82,6 +83,36 @@ func GenerateEntryConfig(entry *models.EntryNode, rules []models.ForwardingRule,
 	// 获取所有 NodeMapping
 	var mappings []models.NodeMapping
 	database.DB.Where("entry_node_id = ?", entry.ID).Find(&mappings)
+
+	// 构建 SNI 路由表 (用于 443 端口智能分流)
+	sniRoutes := make(map[string]int)
+	for _, m := range mappings {
+		if m.Domain != "" && m.Port > 0 {
+			cleanDomain := strings.TrimSpace(m.Domain)
+			if strings.Contains(cleanDomain, ":") {
+				cleanDomain = strings.Split(cleanDomain, ":")[0]
+			}
+			sniRoutes[cleanDomain] = m.Port
+		}
+	}
+
+	// 默认端口处理：如果配置了 443 SNI 分流，且入口默认端口刚好是 443，则 Sing-box 内部 defaultInbound 避开 443 监听 10443
+	hasSNIRoutes := len(sniRoutes) > 0
+	actualDefaultListenPort := entry.Port
+	if hasSNIRoutes && entry.Port == 443 {
+		actualDefaultListenPort = 10443
+	}
+	defaultDomain := entry.Domain
+	if entry.RealityEnabled && entry.RealityServerName != "" {
+		defaultDomain = entry.RealityServerName
+	}
+	if defaultDomain != "" && hasSNIRoutes {
+		cleanDefault := strings.TrimSpace(defaultDomain)
+		if strings.Contains(cleanDefault, ":") {
+			cleanDefault = strings.Split(cleanDefault, ":")[0]
+		}
+		sniRoutes[cleanDefault] = actualDefaultListenPort
+	}
 
 	// 构建端口到 Mapping 的映射（多端口分流核心逻辑）
 	portToMapping := make(map[int]*models.NodeMapping)
@@ -196,7 +227,7 @@ func GenerateEntryConfig(entry *models.EntryNode, rules []models.ForwardingRule,
 		"type":          defaultProtocolType,
 		"tag":           defaultInboundTag,
 		"listen":        "::",
-		"listen_port":   entry.Port,
+		"listen_port":   actualDefaultListenPort,
 		"sniff":         true,
 		"sniff_timeout": "1s", // 放宽到 1s，牺牲极微小首包延迟，换取 100% 握手成功率与长连接稳定性
 		"users":         generateUsers(defaultProtocolFn, defaultPortUsers),
@@ -318,6 +349,35 @@ func GenerateEntryConfig(entry *models.EntryNode, rules []models.ForwardingRule,
 		}
 
 		inboundTag := fmt.Sprintf("node_%d_port_%d", entry.ID, port)
+
+		// 独立 Reality 伪装域名定制
+		portTlsConfig := tlsConfig
+		if entry.RealityEnabled {
+			if m, ok := portToMapping[port]; ok && m.Domain != "" {
+				targetHost := strings.TrimSpace(m.Domain)
+				targetPort := 443
+				if strings.Contains(targetHost, ":") {
+					parts := strings.Split(targetHost, ":")
+					targetHost = parts[0]
+					if p, err := strconv.Atoi(parts[1]); err == nil {
+						targetPort = p
+					}
+				}
+				portTlsConfig = map[string]interface{}{
+					"enabled":     true,
+					"min_version": "1.2",
+					"alpn":        []string{"h2", "http/1.1"},
+					"server_name": targetHost,
+					"reality": map[string]interface{}{
+						"enabled":     true,
+						"handshake":   map[string]interface{}{"server": targetHost, "server_port": targetPort},
+						"private_key": entry.RealityPrivateKey,
+						"short_id":    []string{entry.RealityShortID},
+					},
+				}
+			}
+		}
+
 		inbound := map[string]interface{}{
 			"type":          inboundProtocolType,
 			"tag":           inboundTag,
@@ -326,7 +386,7 @@ func GenerateEntryConfig(entry *models.EntryNode, rules []models.ForwardingRule,
 			"sniff":         true,
 			"sniff_timeout": "1s",
 			"users":         generateUsers(inboundType, users),
-			"tls":           tlsConfig,
+			"tls":           portTlsConfig,
 		}
 
 		// 只有在非 Reality 模式下，且协议为 VLESS 或 Trojan，且传输层为 TCP 时才添加本地伪装回落
@@ -608,6 +668,10 @@ func GenerateEntryConfig(entry *models.EntryNode, rules []models.ForwardingRule,
 	config.Route = map[string]interface{}{
 		"rules": routingRules,
 		"final": defaultExitTag,
+	}
+
+	if len(sniRoutes) > 0 {
+		config.SNIRoutes = sniRoutes
 	}
 
 	res, _ := json.MarshalIndent(config, "", "  ")

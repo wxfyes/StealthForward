@@ -62,6 +62,7 @@ type NodeMapping struct {
 	UnlockDomains string    `json:"unlock_domains"`  // 自定义解锁域名，逗号或换行分隔 (可选)
 	V2boardType   string    `json:"v2board_type"`    // 节点类型
 	Port          int       `json:"port"`            // 该映射独立监听的端口（为 0 时使用入口默认端口）
+	Domain        string    `json:"domain"`          // 绑定的域名/SNI/伪装域名 (用于 443 智能分流)
 	CreatedAt     time.Time `json:"created_at"`
 }
 

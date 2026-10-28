@@ -6,9 +6,9 @@ BINARY_NAME_CLI=stealth-admin
 
 build:
 	@echo "Building for Linux (AMD64)..."
-	GOOS=linux GOARCH=amd64 go build -o bin/$(BINARY_NAME_CTRL) cmd/controller/main.go
-	GOOS=linux GOARCH=amd64 go build -o bin/$(BINARY_NAME_AGENT) cmd/agent/main.go
-	GOOS=linux GOARCH=amd64 go build -o bin/$(BINARY_NAME_CLI) cmd/admin-cli/main.go
+	GOOS=linux GOARCH=amd64 go build -o bin/$(BINARY_NAME_CTRL) ./cmd/controller
+	GOOS=linux GOARCH=amd64 go build -o bin/$(BINARY_NAME_AGENT) ./cmd/agent
+	GOOS=linux GOARCH=amd64 go build -o bin/$(BINARY_NAME_CLI) ./cmd/admin-cli
 	@echo "Build completed. Binaries are in ./bin/ directory."
 
 clean:

@@ -100,7 +100,7 @@ function formatBytes(bytes) {
               <th class="py-4 px-6">来源入口 (Entry)</th>
               <th class="py-4 px-6">V2B 节点 ID</th>
               <th class="py-4 px-6">目标分流 (Exit)</th>
-              <th class="py-4 px-6">监听端口</th>
+              <th class="py-4 px-6">接入方式 (端口 / 443 SNI)</th>
               <th class="py-4 px-6">已用流量</th>
               <th class="py-4 px-6">状态</th>
               <th class="py-4 px-6 text-right">操作</th>
@@ -130,10 +130,16 @@ function formatBytes(bytes) {
                 </div>
               </td>
               <td class="py-4 px-6">
-                <span v-if="m.port > 0" class="font-mono text-amber-400 bg-amber-500/10 px-2 py-1 rounded border border-amber-500/20">
-                  {{ m.port }}
-                </span>
-                <span v-else class="text-[var(--text-muted)] text-xs italic">跟随入口</span>
+                <div class="flex flex-col gap-1 items-start">
+                  <span v-if="m.domain" class="font-mono text-purple-400 bg-purple-500/10 px-2 py-0.5 rounded border border-purple-500/20 text-xs flex items-center gap-1.5" :title="'客户端连接该域名且端口填 443 即可直通'">
+                    <span class="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse"></span>
+                    443 ⚡ {{ m.domain }}
+                  </span>
+                  <span v-if="m.port > 0" class="font-mono text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20 text-xs">
+                    端口: {{ m.port }}
+                  </span>
+                  <span v-else-if="!m.domain" class="text-[var(--text-muted)] text-xs italic">跟随入口</span>
+                </div>
               </td>
               <td class="py-4 px-6">
                 <span class="font-mono text-primary-400 font-bold">
@@ -197,8 +203,12 @@ function formatBytes(bytes) {
               <span class="text-emerald-400 font-medium truncate mt-0.5">{{ findNodeName('exits', m.target_exit_id) }}</span>
             </div>
             <div class="flex flex-col">
-              <span class="text-[var(--text-muted)] text-[10px] uppercase">监听端口</span>
-              <span class="text-amber-400 font-mono font-medium mt-0.5">{{ m.port > 0 ? m.port : '跟随入口' }}</span>
+              <span class="text-[var(--text-muted)] text-[10px] uppercase">接入方式</span>
+              <div class="flex flex-col gap-0.5 mt-0.5">
+                <span v-if="m.domain" class="text-purple-400 font-mono text-[11px] truncate">443 ⚡ {{ m.domain }}</span>
+                <span v-if="m.port > 0" class="text-amber-400 font-mono font-medium">{{ m.port }} 端口</span>
+                <span v-else-if="!m.domain" class="text-[var(--text-muted)] italic">跟随入口</span>
+              </div>
             </div>
             <div class="flex flex-col">
               <span class="text-[var(--text-muted)] text-[10px] uppercase">已用流量</span>

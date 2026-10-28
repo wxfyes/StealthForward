@@ -1,5 +1,5 @@
 <script setup>
-import { ref, inject, onMounted } from 'vue'
+import { ref, computed, inject, onMounted } from 'vue'
 import { useApi } from '../../composables/useApi'
 
 const props = defineProps({
@@ -20,7 +20,15 @@ const form = ref({
   target_exit_id: null,
   unlock_exit_id: null,
   unlock_domains: '',
-  port: null
+  port: null,
+  domain: ''
+})
+
+const currentEntry = computed(() => {
+  return entries.value.find(e => e.id === form.value.entry_node_id)
+})
+const isRealityEntry = computed(() => {
+  return currentEntry.value?.reality_enabled || false
 })
 
 const saving = ref(false)
@@ -55,7 +63,8 @@ async function handleSubmit() {
     target_exit_id: parseInt(form.value.target_exit_id),
     unlock_exit_id: form.value.unlock_exit_id ? parseInt(form.value.unlock_exit_id) : 0,
     unlock_domains: form.value.unlock_domains || '',
-    port: form.value.port || 0
+    port: form.value.port || 0,
+    domain: form.value.domain ? form.value.domain.trim() : ''
   }
   
   try {
@@ -134,6 +143,23 @@ async function handleSubmit() {
         <label class="flex flex-col gap-1.5 text-[var(--text-muted)]">
           自定义端口 (可选)
           <input type="number" v-model.number="form.port" placeholder="留空则跟随入口默认" />
+        </label>
+
+        <label class="flex flex-col gap-1.5 text-[var(--text-muted)]">
+          <div class="flex items-center justify-between">
+            <span>{{ isRealityEntry ? 'Reality 伪装域名 (443 分流)' : '子域名 / SNI (443 分流)' }}</span>
+            <span class="text-xs text-primary-400 font-mono">统一 443 端口</span>
+          </div>
+          <input 
+            type="text" 
+            v-model="form.domain" 
+            :placeholder="isRealityEntry ? '例如: www.apple.com (留空则沿用入口伪装)' : '例如: hk.yourdomain.com (留空则不启用)'" 
+          />
+          <span class="text-xs text-[var(--text-muted)] opacity-80">
+            {{ isRealityEntry 
+              ? '选填。若填写，客户端连接该伪装站:443 即可进入该落地；免证书 + 极高抗封锁。' 
+              : '选填。若填写，客户端连接该二级域名:443 即可进入该落地；上方端口依然开放直连。' }}
+          </span>
         </label>
       </div>
       
