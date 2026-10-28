@@ -33,7 +33,7 @@ StealthForward 是一个高性能的流量转发和中转管理系统，专为�
 
 ### 1. 更新安装脚本
 ```bash
-wget -O /root/install.sh https://raw.githubusercontent.com/wangn9900/StealthForward/main/scripts/install.sh && chmod +x /root/install.sh
+wget -O /root/install.sh https://raw.githubusercontent.com/wxfyes/StealthForward/main/scripts/install.sh && chmod +x /root/install.sh
 ```
 
 ### 2. 安装/更新

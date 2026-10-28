@@ -134,7 +134,7 @@ async function reprovisionNode() {
 }
 
 function copyUpdateCommand() {
-  const cmd = `curl -fsSL https://raw.githubusercontent.com/wangn9900/StealthForward/main/scripts/install.sh | bash -s -- --update-agent`
+  const cmd = `curl -fsSL https://raw.githubusercontent.com/wxfyes/StealthForward/main/scripts/install.sh | bash -s -- --update-agent`
   
   navigator.clipboard.writeText(cmd).then(() => {
     alert('Agent 更新命令已复制！(将自动更新至最新 Release 版本)')
@@ -144,7 +144,7 @@ function copyUpdateCommand() {
 function copyInstallCommand() {
   const token = settings.value['system.communication_token'] || 'YOUR_TOKEN'
   const host = window.location.origin
-  const cmd = `export CTRL_ADDR='${host}' && export NODE_ID='${props.entry.id}' && export CTRL_TOKEN='${token}' && export CTRL_DOMAIN='${props.entry.domain}' && curl -fsSL https://raw.githubusercontent.com/wangn9900/StealthForward/main/scripts/install.sh | bash -s -- 2`
+  const cmd = `export CTRL_ADDR='${host}' && export NODE_ID='${props.entry.id}' && export CTRL_TOKEN='${token}' && export CTRL_DOMAIN='${props.entry.domain}' && curl -fsSL https://raw.githubusercontent.com/wxfyes/StealthForward/main/scripts/install.sh | bash -s -- 2`
   
   navigator.clipboard.writeText(cmd).then(() => {
     alert('一键安装/对接命令已复制！\n说明：请在目标中转机(root)执行此命令即可完成对接。')

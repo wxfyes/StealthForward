@@ -336,15 +336,25 @@ func GenerateEntryConfig(entry *models.EntryNode, rules []models.ForwardingRule,
 
 	config.Inbounds = append(config.Inbounds, defaultInbound)
 
-	// 为每个独立端口创建 inbound
-	var ports []int
+	// 为每个独立端口创建 inbound (包含所有 Mapping 分流端口和有用户的端口)
+	portSet := make(map[int]bool)
+	for p := range portToMapping {
+		portSet[p] = true
+	}
 	for p := range portToUsers {
+		portSet[p] = true
+	}
+	var ports []int
+	for p := range portSet {
 		ports = append(ports, p)
 	}
 	sort.Ints(ports)
 
 	for _, port := range ports {
 		users := portToUsers[port]
+		if len(users) == 0 {
+			users = rules // 兜底：若暂无该端口的独立分流用户，使用全局用户列表，确保任何合法用户都能连通认证
+		}
 		inboundType := "vless"
 		if m, ok := portToMapping[port]; ok && m.V2boardType != "" {
 			inboundType = m.V2boardType

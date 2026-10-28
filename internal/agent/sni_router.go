@@ -129,7 +129,7 @@ func (r *SNIRouter) handleConn(clientConn net.Conn) {
 
 	// 设置首包超时，防挂死
 	_ = clientConn.SetReadDeadline(time.Now().Add(3 * time.Second))
-	buf := make([]byte, 1024)
+	buf := make([]byte, 4096)
 	n, err := clientConn.Read(buf)
 	if err != nil || n == 0 {
 		return
@@ -149,10 +149,10 @@ func (r *SNIRouter) handleConn(clientConn net.Conn) {
 	var targetAddr string
 	if targetPort > 0 {
 		targetAddr = fmt.Sprintf("127.0.0.1:%d", targetPort)
-		// log.Printf("[SNI-Router] 匹配成功: SNI=%s -> %s", sni, targetAddr)
+		log.Printf("[SNI-Router] 匹配成功: Client=%s -> SNI=%s -> 本地后端=%s", clientConn.RemoteAddr(), sni, targetAddr)
 	} else {
 		targetAddr = fallback
-		// log.Printf("[SNI-Router] 未匹配或探针: SNI=%s -> Fallback=%s", sni, targetAddr)
+		log.Printf("[SNI-Router] 未匹配规则: Client=%s -> SNI=%s -> Fallback=%s", clientConn.RemoteAddr(), sni, targetAddr)
 	}
 
 	targetConn, err := net.DialTimeout("tcp", targetAddr, 2*time.Second)
