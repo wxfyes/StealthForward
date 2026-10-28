@@ -236,12 +236,18 @@ func GenerateEntryConfig(entry *models.EntryNode, rules []models.ForwardingRule,
 		defaultProtocolType = "shadowsocks"
 	}
 
+	defaultListenAddr := "::"
+	if hasSNIRoutes && actualDefaultListenPort != entry.Port {
+		// 默认入口被改为了内部避开端口 (如 10443)，由 443 SNI 路由纳管，仅监听 127.0.0.1
+		defaultListenAddr = "127.0.0.1"
+	}
+
 	// 创建默认端口的 inbound
 	defaultInboundTag := fmt.Sprintf("node_%d", entry.ID)
 	defaultInbound := map[string]interface{}{
 		"type":          defaultProtocolType,
 		"tag":           defaultInboundTag,
-		"listen":        "::",
+		"listen":        defaultListenAddr,
 		"listen_port":   actualDefaultListenPort,
 		"sniff":         true,
 		"sniff_timeout": "1s", // 放宽到 1s，牺牲极微小首包延迟，换取 100% 握手成功率与长连接稳定性
@@ -355,6 +361,14 @@ func GenerateEntryConfig(entry *models.EntryNode, rules []models.ForwardingRule,
 	}
 	sort.Ints(ports)
 
+	// 统计被 SNI 分流纳管的端口：这些端口仅供本机 127.0.0.1 内部转发，绝不对外暴露监听，彻底防止公网端口扫描与 GFW 标记
+	managedPorts := make(map[int]bool)
+	if hasSNIRoutes {
+		for _, targetPort := range sniRoutes {
+			managedPorts[targetPort] = true
+		}
+	}
+
 	for _, port := range ports {
 		users := portToUsers[port]
 		if len(users) == 0 {
@@ -415,10 +429,15 @@ func GenerateEntryConfig(entry *models.EntryNode, rules []models.ForwardingRule,
 			portTlsConfig = subTls
 		}
 
+		subListenAddr := "::"
+		if managedPorts[port] {
+			subListenAddr = "127.0.0.1"
+		}
+
 		inbound := map[string]interface{}{
 			"type":          inboundProtocolType,
 			"tag":           inboundTag,
-			"listen":        "::",
+			"listen":        subListenAddr,
 			"listen_port":   port,
 			"sniff":         true,
 			"sniff_timeout": "1s",

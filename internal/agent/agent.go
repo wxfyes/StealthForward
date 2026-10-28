@@ -36,7 +36,7 @@ import (
 
 const (
 	// Version 客户端版本号
-	Version = "v3.9.27"
+	Version = "v3.9.28"
 )
 
 type Config struct {
