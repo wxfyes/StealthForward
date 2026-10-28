@@ -272,8 +272,25 @@ async function handleSubmit() {
         </div>
         
         <label class="flex flex-col gap-1.5 text-[var(--text-muted)]">
-          监听端口
+          <div class="flex justify-between items-center">
+            <span>对外统一端口 (分流入口)</span>
+            <div class="flex gap-1">
+              <button 
+                type="button" 
+                v-for="p in [443, 8443, 2053, 2096]" 
+                :key="p" 
+                @click="form.port = p" 
+                class="px-1.5 py-0.5 text-[10px] rounded bg-white/10 hover:bg-primary-500 hover:text-white transition font-mono cursor-pointer"
+                :class="{'bg-primary-500 text-white font-bold': form.port === p}"
+              >
+                {{ p }}
+              </button>
+            </div>
+          </div>
           <input type="number" v-model.number="form.port" placeholder="443" />
+          <span class="text-[10px] text-amber-500/70 leading-tight">
+            所有子落地统一从此端口进入并按 SNI 分流。若 443 被阻断可自由选择 8443、2053、2096 等。
+          </span>
         </label>
 
         <label class="flex flex-col gap-1.5 text-[var(--text-muted)]">

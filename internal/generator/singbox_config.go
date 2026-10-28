@@ -14,13 +14,14 @@ import (
 
 // SingBoxConfig 绝不包含任何会让魔改内核崩溃的 experimental 或 hosts 字段
 type SingBoxConfig struct {
-	Log       interface{}       `json:"log"`
-	DNS       interface{}       `json:"dns,omitempty"`
-	Route     interface{}       `json:"route"`
-	Outbounds []interface{}     `json:"outbounds"`
-	Inbounds  []interface{}     `json:"inbounds"`
-	Provision map[string]string `json:"provision,omitempty"`
-	SNIRoutes map[string]int    `json:"sni_routes,omitempty"`
+	Log        interface{}       `json:"log"`
+	DNS        interface{}       `json:"dns,omitempty"`
+	Route      interface{}       `json:"route"`
+	Outbounds  []interface{}     `json:"outbounds"`
+	Inbounds   []interface{}     `json:"inbounds"`
+	Provision  map[string]string `json:"provision,omitempty"`
+	SNIRoutes  map[string]int    `json:"sni_routes,omitempty"`
+	PublicPort int               `json:"public_port,omitempty"` // 统一对外分流端口 (如 443, 8443, 2053, 2096)
 }
 
 func GenerateEntryConfig(entry *models.EntryNode, rules []models.ForwardingRule, exits []models.ExitNode) (string, error) {
@@ -96,11 +97,20 @@ func GenerateEntryConfig(entry *models.EntryNode, rules []models.ForwardingRule,
 		}
 	}
 
-	// 默认端口处理：如果配置了 443 SNI 分流，且入口默认端口刚好是 443，则 Sing-box 内部 defaultInbound 避开 443 监听 10443
+	// 确定对外统一分流端口 (默认为 entry.Port，若 <= 0 则默认为 443)
+	publicPort := entry.Port
+	if publicPort <= 0 {
+		publicPort = 443
+	}
+
+	// 默认端口处理：如果配置了 SNI 分流，且入口默认端口刚好是对外统一端口，则 Sing-box 内部 defaultInbound 避开它监听本地内部端口
 	hasSNIRoutes := len(sniRoutes) > 0
 	actualDefaultListenPort := entry.Port
-	if hasSNIRoutes && entry.Port == 443 {
-		actualDefaultListenPort = 10443
+	if hasSNIRoutes && entry.Port == publicPort {
+		actualDefaultListenPort = 10000 + (publicPort % 10000)
+		if actualDefaultListenPort == publicPort {
+			actualDefaultListenPort = 10443
+		}
 	}
 	defaultDomain := entry.Domain
 	if entry.RealityEnabled && entry.RealityServerName != "" {
@@ -672,6 +682,7 @@ func GenerateEntryConfig(entry *models.EntryNode, rules []models.ForwardingRule,
 
 	if len(sniRoutes) > 0 {
 		config.SNIRoutes = sniRoutes
+		config.PublicPort = publicPort
 	}
 
 	res, _ := json.MarshalIndent(config, "", "  ")

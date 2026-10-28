@@ -20,6 +20,11 @@ function findNodeName(list, id) {
   return node ? node.name : ''
 }
 
+function getEntryPort(entryId) {
+  const e = entries.value?.find(entry => entry.id === entryId)
+  return e && e.port ? e.port : 443
+}
+
 function openAddMapping() {
   editingMapping.value = null
   showModal.value = true
@@ -131,9 +136,9 @@ function formatBytes(bytes) {
               </td>
               <td class="py-4 px-6">
                 <div class="flex flex-col gap-1 items-start">
-                  <span v-if="m.domain" class="font-mono text-purple-400 bg-purple-500/10 px-2 py-0.5 rounded border border-purple-500/20 text-xs flex items-center gap-1.5" :title="'客户端连接该域名且端口填 443 即可直通'">
+                  <span v-if="m.domain" class="font-mono text-purple-400 bg-purple-500/10 px-2 py-0.5 rounded border border-purple-500/20 text-xs flex items-center gap-1.5" :title="`客户端连接该域名且端口填 ${getEntryPort(m.entry_node_id)} 即可直通`">
                     <span class="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse"></span>
-                    443 ⚡ {{ m.domain }}
+                    {{ getEntryPort(m.entry_node_id) }} ⚡ {{ m.domain }}
                   </span>
                   <span v-if="m.port > 0" class="font-mono text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20 text-xs">
                     端口: {{ m.port }}
@@ -205,7 +210,7 @@ function formatBytes(bytes) {
             <div class="flex flex-col">
               <span class="text-[var(--text-muted)] text-[10px] uppercase">接入方式</span>
               <div class="flex flex-col gap-0.5 mt-0.5">
-                <span v-if="m.domain" class="text-purple-400 font-mono text-[11px] truncate">443 ⚡ {{ m.domain }}</span>
+                <span v-if="m.domain" class="text-purple-400 font-mono text-[11px] truncate">{{ getEntryPort(m.entry_node_id) }} ⚡ {{ m.domain }}</span>
                 <span v-if="m.port > 0" class="text-amber-400 font-mono font-medium">{{ m.port }} 端口</span>
                 <span v-else-if="!m.domain" class="text-[var(--text-muted)] italic">跟随入口</span>
               </div>

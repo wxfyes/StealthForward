@@ -147,8 +147,8 @@ async function handleSubmit() {
 
         <label class="flex flex-col gap-1.5 text-[var(--text-muted)]">
           <div class="flex items-center justify-between">
-            <span>{{ isRealityEntry ? 'Reality 伪装域名 (443 分流)' : '子域名 / SNI (443 分流)' }}</span>
-            <span class="text-xs text-primary-400 font-mono">统一 443 端口</span>
+            <span>{{ isRealityEntry ? 'Reality 伪装域名 (智能分流)' : '子域名 / SNI (智能分流)' }}</span>
+            <span class="text-xs text-primary-400 font-mono">统一 {{ currentEntry?.port || 443 }} 端口</span>
           </div>
           <input 
             type="text" 
@@ -157,8 +157,8 @@ async function handleSubmit() {
           />
           <span class="text-xs text-[var(--text-muted)] opacity-80">
             {{ isRealityEntry 
-              ? '选填。若填写，客户端连接该伪装站:443 即可进入该落地；免证书 + 极高抗封锁。' 
-              : '选填。若填写，客户端连接该二级域名:443 即可进入该落地；上方端口依然开放直连。' }}
+              ? `选填。若填写，客户端连接该伪装站:${currentEntry?.port || 443} 即可进入该落地；免证书 + 极高抗封锁。` 
+              : `选填。若填写，客户端连接该二级域名:${currentEntry?.port || 443} 即可进入该落地；上方端口依然开放直连。` }}
           </span>
         </label>
       </div>

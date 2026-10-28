@@ -16,6 +16,7 @@ type SNIRouter struct {
 	mu       sync.RWMutex
 	routes   map[string]int // SNI (小写) -> 本地目标端口 (例如 10001)
 	fallback string         // 未匹配或非 TLS 流量回落地址，例如 "127.0.0.1:8081"
+	port     int            // 对外监听端口 (如 443, 8443, 2053, 2096)
 	listener net.Listener
 	ctx      context.Context
 	cancel   context.CancelFunc
@@ -26,13 +27,21 @@ func NewSNIRouter() *SNIRouter {
 	return &SNIRouter{
 		routes:   make(map[string]int),
 		fallback: "127.0.0.1:8081",
+		port:     443,
 	}
 }
 
-// UpdateRoutes 更新 SNI 路由表并根据需要启动或停止 443 监听
-func (r *SNIRouter) UpdateRoutes(newRoutes map[string]int, fallback string) {
+// UpdateRoutes 更新 SNI 路由表并根据需要启动或停止对外端口监听
+func (r *SNIRouter) UpdateRoutes(newRoutes map[string]int, fallback string, publicPort int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	if publicPort <= 0 {
+		publicPort = 443
+	}
+
+	portChanged := r.running && r.port != publicPort
+	r.port = publicPort
 
 	// 清理格式并转换为小写
 	cleaned := make(map[string]int)
@@ -50,22 +59,27 @@ func (r *SNIRouter) UpdateRoutes(newRoutes map[string]int, fallback string) {
 		r.fallback = fallback
 	}
 
-	log.Printf("[SNI-Router] 更新路由表，当前规则数: %d, Fallback: %s", len(r.routes), r.fallback)
+	log.Printf("[SNI-Router] 更新路由表，对外统一分流端口: %d, 当前规则数: %d, Fallback: %s", r.port, len(r.routes), r.fallback)
 	for sni, port := range r.routes {
 		log.Printf("[SNI-Router]   -> SNI: %s => 127.0.0.1:%d", sni, port)
 	}
 
-	// 如果有规则且未启动，则启动 443 监听
+	// 如果端口改变了，先停掉旧端口
+	if portChanged {
+		r.stopLocked()
+	}
+
+	// 如果有规则且未启动，则启动对外端口监听
 	if len(r.routes) > 0 && !r.running {
 		r.startLocked()
 	} else if len(r.routes) == 0 && r.running {
-		// 如果规则被清空，则释放 443 监听
+		// 如果规则被清空，则释放监听
 		r.stopLocked()
 	}
 }
 
 func (r *SNIRouter) startLocked() {
-	addr := "0.0.0.0:443"
+	addr := fmt.Sprintf("0.0.0.0:%d", r.port)
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		log.Printf("[SNI-Router] 警告: 监听 %s 失败 (可能端口已被占用): %v", addr, err)
@@ -75,7 +89,7 @@ func (r *SNIRouter) startLocked() {
 	r.listener = ln
 	r.running = true
 	r.ctx, r.cancel = context.WithCancel(context.Background())
-	log.Printf("[SNI-Router] 成功监听 %s，443 端口智能分流已就绪", addr)
+	log.Printf("[SNI-Router] 成功监听 %s，智能分流已就绪", addr)
 
 	go r.acceptLoop(ln, r.ctx)
 }
@@ -89,7 +103,7 @@ func (r *SNIRouter) stopLocked() {
 		r.listener = nil
 	}
 	r.running = false
-	log.Printf("[SNI-Router] 已停止 443 端口监听")
+	log.Printf("[SNI-Router] 已停止对外分流端口监听 (%d)", r.port)
 }
 
 func (r *SNIRouter) acceptLoop(ln net.Listener, ctx context.Context) {

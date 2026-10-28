@@ -36,7 +36,7 @@ import (
 
 const (
 	// Version 客户端版本号
-	Version = "v3.9.24"
+	Version = "v3.9.25"
 )
 
 type Config struct {
@@ -237,7 +237,13 @@ func (a *Agent) ApplyConfig(configStr string) error {
 	if err := json.Unmarshal([]byte(configStr), &configMap); err == nil {
 		delete(configMap, "provision")
 
-		// 提取 SNI 路由并热更新 443 智能分流
+		publicPort := 443
+		if pp, ok := configMap["public_port"].(float64); ok && pp > 0 {
+			publicPort = int(pp)
+		}
+		delete(configMap, "public_port")
+
+		// 提取 SNI 路由并热更新对外智能分流
 		if sr, ok := configMap["sni_routes"].(map[string]interface{}); ok && len(sr) > 0 {
 			newRoutes := make(map[string]int)
 			for sni, portVal := range sr {
@@ -246,9 +252,9 @@ func (a *Agent) ApplyConfig(configStr string) error {
 				}
 			}
 			fallback := "127.0.0.1:8081"
-			a.sniRouter.UpdateRoutes(newRoutes, fallback)
+			a.sniRouter.UpdateRoutes(newRoutes, fallback, publicPort)
 		} else {
-			a.sniRouter.UpdateRoutes(nil, "127.0.0.1:8081")
+			a.sniRouter.UpdateRoutes(nil, "127.0.0.1:8081", publicPort)
 		}
 		delete(configMap, "sni_routes")
 
